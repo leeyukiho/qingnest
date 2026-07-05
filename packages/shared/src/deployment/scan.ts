@@ -1,0 +1,221 @@
+import { platformConfig, getPlanConfig } from "../config/platform";
+import { getContentType } from "./mime";
+import type { DeploymentFile, DeploymentScanIssue, DeploymentScanResult } from "./types";
+
+export type ScanInputFile = {
+  path: string;
+  size: number;
+  text?: string;
+};
+
+function normalizePath(path: string) {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function isPathTraversal(path: string) {
+  return path.split("/").some((part) => part === "..");
+}
+
+function startsWithBlockedPath(path: string) {
+  const normalized = normalizePath(path).toLowerCase();
+  return platformConfig.deployment.blockedPaths.some((blockedPath) => {
+    const blocked = blockedPath.toLowerCase();
+    return blocked.endsWith("/") ? normalized.startsWith(blocked) : normalized === blocked || normalized.endsWith(`/${blocked}`);
+  });
+}
+
+function scoreHtmlRisk(file: ScanInputFile) {
+  const text = file.text?.slice(0, platformConfig.deployment.maxPreviewHtmlBytes) ?? "";
+  let score = 0;
+  const issues: DeploymentScanIssue[] = [];
+
+  if (!text) {
+    return { score, issues };
+  }
+
+  for (const keyword of platformConfig.riskRules.highRiskKeywords) {
+    if (text.includes(keyword)) {
+      score += 10;
+      issues.push({
+        severity: "warning",
+        code: "high_risk_keyword",
+        message: `页面包含高风险词：${keyword}`,
+        path: file.path
+      });
+    }
+  }
+
+  if (/<input[^>]+type=["']?password/i.test(text)) {
+    score += platformConfig.riskRules.passwordInputRiskScore;
+    issues.push({
+      severity: "warning",
+      code: "password_input",
+      message: "页面包含密码输入框，可能需要审核",
+      path: file.path
+    });
+  }
+
+  if (/<form[^>]+action=["']https?:\/\//i.test(text)) {
+    score += platformConfig.riskRules.externalFormActionRiskScore;
+    issues.push({
+      severity: "warning",
+      code: "external_form_action",
+      message: "页面表单提交到外部域名，可能需要审核",
+      path: file.path
+    });
+  }
+
+  if (/(eval\(|atob\(|fromCharCode|base64)/i.test(text)) {
+    score += platformConfig.riskRules.obfuscatedScriptRiskScore;
+    issues.push({
+      severity: "warning",
+      code: "obfuscated_script",
+      message: "页面可能包含混淆脚本",
+      path: file.path
+    });
+  }
+
+  return { score, issues };
+}
+
+function findSuggestedOutputDirectory(paths: string[]) {
+  for (const dir of platformConfig.deployment.staticOutputDirectories) {
+    if (paths.includes(`${dir}/index.html`)) {
+      return dir;
+    }
+  }
+
+  return null;
+}
+
+export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "free"): DeploymentScanResult {
+  const plan = getPlanConfig(planName);
+  const issues: DeploymentScanIssue[] = [];
+  const files: DeploymentFile[] = [];
+  const paths = inputFiles.map((file) => normalizePath(file.path));
+  let totalBytes = 0;
+  let riskScore = 0;
+
+  for (const inputFile of inputFiles) {
+    const path = normalizePath(inputFile.path);
+    totalBytes += inputFile.size;
+
+    if (!path || isPathTraversal(path)) {
+      issues.push({
+        severity: "error",
+        code: "unsafe_path",
+        message: "文件路径不安全，不能包含空路径或 ../",
+        path: inputFile.path
+      });
+      continue;
+    }
+
+    if (startsWithBlockedPath(path)) {
+      issues.push({
+        severity: "error",
+        code: "blocked_path",
+        message: "包含不应发布的文件或目录",
+        path
+      });
+    }
+
+    if (path.length > plan.quotas.deployment.maxPathLength) {
+      issues.push({
+        severity: "error",
+        code: "path_too_long",
+        message: `文件路径超过当前套餐限制：${plan.quotas.deployment.maxPathLength} 个字符`,
+        path
+      });
+    }
+
+    if (inputFile.size > plan.quotas.deployment.maxFileBytes) {
+      issues.push({
+        severity: "error",
+        code: "file_too_large",
+        message: `单个文件超过当前套餐限制：${Math.round(plan.quotas.deployment.maxFileBytes / 1024 / 1024)} MB`,
+        path
+      });
+    }
+
+    if (path.toLowerCase().endsWith(".html")) {
+      const risk = scoreHtmlRisk({ ...inputFile, path });
+      riskScore += risk.score;
+      issues.push(...risk.issues);
+    }
+
+    files.push({
+      path,
+      size: inputFile.size,
+      contentType: getContentType(path)
+    });
+  }
+
+  if (files.length > plan.quotas.deployment.maxFiles) {
+    issues.push({
+      severity: "error",
+      code: "too_many_files",
+      message: `文件数量超过当前套餐限制：${plan.quotas.deployment.maxFiles} 个`
+    });
+  }
+
+  if (totalBytes > plan.quotas.site.maxSiteBytes) {
+    issues.push({
+      severity: "error",
+      code: "site_too_large",
+      message: `站点总大小超过当前套餐限制：${Math.round(plan.quotas.site.maxSiteBytes / 1024 / 1024)} MB`
+    });
+  }
+
+  const entrypoint = platformConfig.deployment.entrypoints.find((entry) => paths.includes(entry)) ?? null;
+  const suggestedOutputDirectory = findSuggestedOutputDirectory(paths);
+  const likelySourceProject = platformConfig.deployment.sourceIndicators.some((indicator) => paths.includes(indicator));
+
+  if (!entrypoint && suggestedOutputDirectory) {
+    issues.push({
+      severity: "warning",
+      code: "nested_static_output",
+      message: `检测到 ${suggestedOutputDirectory}/index.html，建议发布 ${suggestedOutputDirectory} 文件夹内的内容`
+    });
+  }
+
+  if (!entrypoint && likelySourceProject && !suggestedOutputDirectory) {
+    issues.push({
+      severity: "error",
+      code: "source_project_without_build",
+      message: "检测到源码项目但没有构建产物。请先运行 npm install 和 npm run build，再上传 dist/build/out 文件夹"
+    });
+  }
+
+  if (!entrypoint && !suggestedOutputDirectory) {
+    issues.push({
+      severity: "error",
+      code: "missing_index",
+      message: "没有找到 index.html，静态站点必须包含入口文件"
+    });
+  }
+
+  const hasRoutingScript = inputFiles.some((file) => {
+    const text = file.text ?? "";
+    return /createBrowserRouter|BrowserRouter|history\.pushState|vue-router|svelte-routing/.test(text);
+  });
+
+  const riskLevel =
+    riskScore >= platformConfig.riskRules.highRiskThreshold
+      ? "high"
+      : riskScore >= platformConfig.riskRules.manualReviewThreshold
+        ? "medium"
+        : "low";
+
+  return {
+    fileCount: files.length,
+    totalBytes,
+    entrypoint,
+    likelySourceProject,
+    suggestedOutputDirectory,
+    spaFallbackRecommended: platformConfig.deployment.spaFallbackDefault || hasRoutingScript,
+    riskScore,
+    riskLevel,
+    issues,
+    files
+  };
+}

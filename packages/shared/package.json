@@ -1,0 +1,13 @@
+{
+  "name": "@qingnest/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./config/platform": "./src/config/platform.ts",
+    "./config/schema": "./src/config/schema.ts",
+    "./deployment/mime": "./src/deployment/mime.ts",
+    "./deployment/scan": "./src/deployment/scan.ts",
+    "./deployment/types": "./src/deployment/types.ts"
+  }
+}

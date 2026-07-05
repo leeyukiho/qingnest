@@ -1,0 +1,33 @@
+node_modules/
+
+# Build outputs and caches
+dist/
+coverage/
+*.tsbuildinfo
+
+# Logs
+*.log
+vite-preview*.log
+
+# Environment variables and local secrets
+.env
+.env.local
+.env.*.local
+.dev.vars
+**/.dev.vars
+
+# Cloudflare local state and dashboard-managed config
+.wrangler/
+**/.wrangler/
+apps/worker/wrangler.toml
+
+# Supabase local state. Keep migrations, seed.sql, and config.toml versioned.
+supabase/.temp/
+
+# Local-only runbooks and private planning notes
+*.local.md
+产品计划书.md
+
+# Local agent/tooling state
+.agents/
+skills-lock.json

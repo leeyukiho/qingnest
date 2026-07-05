@@ -1,0 +1,278 @@
+{
+  "brand": {
+    "name": "QingNest",
+    "cnName": "轻巢",
+    "supportEmail": "support@example.com",
+    "abuseEmail": "abuse@example.com"
+  },
+  "domains": {
+    "appHost": "app.example.com",
+    "distributionRoot": "sites.example.com",
+    "publicProtocol": "https"
+  },
+  "subdomainPolicy": {
+    "minLength": 3,
+    "maxLength": 32,
+    "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$",
+    "disallowConsecutiveHyphen": true,
+    "reserved": [
+      "www",
+      "app",
+      "api",
+      "admin",
+      "dashboard",
+      "login",
+      "auth",
+      "cdn",
+      "assets",
+      "static",
+      "support",
+      "help",
+      "docs",
+      "status",
+      "abuse",
+      "security",
+      "mail",
+      "smtp",
+      "imap",
+      "root",
+      "system",
+      "official",
+      "qingnest",
+      "qingpage",
+      "kuaipage",
+      "cloudflare",
+      "vercel",
+      "paypal",
+      "apple",
+      "google",
+      "microsoft",
+      "facebook",
+      "instagram",
+      "tiktok",
+      "bank"
+    ],
+    "manualReviewKeywords": [
+      "bank",
+      "paypal",
+      "apple",
+      "google",
+      "microsoft",
+      "facebook",
+      "instagram",
+      "tiktok",
+      "wallet",
+      "exchange",
+      "crypto",
+      "login",
+      "verify"
+    ]
+  },
+  "plans": {
+    "free": {
+      "label": "免费版",
+      "enabled": true,
+      "requirements": {
+        "requireEmailVerified": true,
+        "requireTurnstile": true,
+        "manualReviewOnHighRisk": true
+      },
+      "quotas": {
+        "user": {
+          "maxSites": 3,
+          "maxStorageBytes": 157286400,
+          "maxDeploymentsPerDay": 20,
+          "maxUploadSessionsPerHour": 10
+        },
+        "site": {
+          "maxSiteBytes": 52428800,
+          "maxRetainedDeployments": 3,
+          "maxDomainsPerSite": 1
+        },
+        "deployment": {
+          "maxArchiveBytes": 52428800,
+          "maxFileBytes": 10485760,
+          "maxFiles": 1000,
+          "maxPathLength": 240,
+          "uploadSessionTtlMinutes": 30
+        },
+        "traffic": {
+          "maxRequestsPerMinute": 120,
+          "maxRequestsPerDay": 10000,
+          "maxBandwidthBytesPerMonth": 1073741824
+        }
+      },
+      "capabilities": {
+        "customDomain": false,
+        "passwordProtection": false,
+        "accessAnalytics": false,
+        "removeBranding": false,
+        "rollback": true,
+        "sourceBuild": false
+      }
+    },
+    "starter": {
+      "label": "入门版",
+      "enabled": true,
+      "requirements": {
+        "requireEmailVerified": true,
+        "requireTurnstile": false,
+        "manualReviewOnHighRisk": true
+      },
+      "quotas": {
+        "user": {
+          "maxSites": 20,
+          "maxStorageBytes": 2147483648,
+          "maxDeploymentsPerDay": 100,
+          "maxUploadSessionsPerHour": 50
+        },
+        "site": {
+          "maxSiteBytes": 209715200,
+          "maxRetainedDeployments": 20,
+          "maxDomainsPerSite": 1
+        },
+        "deployment": {
+          "maxArchiveBytes": 209715200,
+          "maxFileBytes": 52428800,
+          "maxFiles": 3000,
+          "maxPathLength": 240,
+          "uploadSessionTtlMinutes": 60
+        },
+        "traffic": {
+          "maxRequestsPerMinute": 600,
+          "maxRequestsPerDay": 100000,
+          "maxBandwidthBytesPerMonth": 21474836480
+        }
+      },
+      "capabilities": {
+        "customDomain": false,
+        "passwordProtection": true,
+        "accessAnalytics": true,
+        "removeBranding": true,
+        "rollback": true,
+        "sourceBuild": false
+      }
+    },
+    "pro": {
+      "label": "专业版",
+      "enabled": true,
+      "requirements": {
+        "requireEmailVerified": true,
+        "requireTurnstile": false,
+        "manualReviewOnHighRisk": true
+      },
+      "quotas": {
+        "user": {
+          "maxSites": 100,
+          "maxStorageBytes": 21474836480,
+          "maxDeploymentsPerDay": 500,
+          "maxUploadSessionsPerHour": 200
+        },
+        "site": {
+          "maxSiteBytes": 1073741824,
+          "maxRetainedDeployments": 100,
+          "maxDomainsPerSite": 5
+        },
+        "deployment": {
+          "maxArchiveBytes": 1073741824,
+          "maxFileBytes": 104857600,
+          "maxFiles": 10000,
+          "maxPathLength": 240,
+          "uploadSessionTtlMinutes": 120
+        },
+        "traffic": {
+          "maxRequestsPerMinute": 3000,
+          "maxRequestsPerDay": 1000000,
+          "maxBandwidthBytesPerMonth": 214748364800
+        }
+      },
+      "capabilities": {
+        "customDomain": true,
+        "passwordProtection": true,
+        "accessAnalytics": true,
+        "removeBranding": true,
+        "rollback": true,
+        "sourceBuild": true
+      }
+    }
+  },
+  "abuseControls": {
+    "newUserCooldownMinutes": 10,
+    "maxSitesCreatedPerHour": 5,
+    "maxFailedDeploymentsPerHour": 10,
+    "autoBlockRiskScore": 90,
+    "manualReviewRiskScore": 45,
+    "rateLimitWindowSeconds": 60
+  },
+  "deployment": {
+    "acceptedArchiveExtensions": [".zip"],
+    "entrypoints": ["index.html"],
+    "staticOutputDirectories": ["dist", "build", "out", "public"],
+    "sourceIndicators": ["package.json", "vite.config.ts", "vite.config.js", "next.config.js", "nuxt.config.ts"],
+    "blockedPaths": [
+      ".git/",
+      ".github/",
+      ".env",
+      ".env.local",
+      ".env.production",
+      "node_modules/",
+      "coverage/",
+      ".next/cache/",
+      "private.key",
+      "id_rsa",
+      "id_ed25519"
+    ],
+    "spaFallbackDefault": true,
+    "maxPreviewHtmlBytes": 250000
+  },
+  "riskRules": {
+    "highRiskKeywords": [
+      "银行卡",
+      "银行登录",
+      "支付密码",
+      "钱包助记词",
+      "交易所登录",
+      "邮箱密码",
+      "验证码",
+      "博彩",
+      "成人",
+      "贷款",
+      "中奖"
+    ],
+    "externalFormActionRiskScore": 40,
+    "passwordInputRiskScore": 25,
+    "obfuscatedScriptRiskScore": 20,
+    "highRiskThreshold": 70,
+    "manualReviewThreshold": 45
+  },
+  "mimeTypes": {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".wasm": "application/wasm",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".txt": "text/plain; charset=utf-8"
+  },
+  "cache": {
+    "html": "no-cache",
+    "assetsWithHash": "public, max-age=31536000, immutable",
+    "assetsDefault": "public, max-age=3600"
+  },
+  "securityHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
+  }
+}
