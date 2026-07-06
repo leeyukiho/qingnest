@@ -5,3 +5,6 @@ PUBLIC_PROTOCOL=https
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=replace-with-public-anon-key
 SUPABASE_SERVICE_ROLE_KEY=replace-with-service-role-key
+RESEND_API_KEY=replace-with-resend-api-key
+RESEND_FROM_EMAIL=noreply@example.com
+RESEND_FROM_NAME=QingNest 轻巢

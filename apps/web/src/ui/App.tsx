@@ -20,16 +20,21 @@ import {
 } from "lucide-react";
 import {
   checkSubdomain,
+  createUploadSession,
   createSite,
   getAdminOverview,
   getCurrentAccount,
   setAccessTokenProvider,
   signUpWithEmailPassword,
+  uploadArchive,
   type AccountProfile,
   type AdminOverview,
   type SiteDraft,
-  type SubdomainCheck
+  type SubdomainCheck,
+  type UploadArchiveResult
 } from "@/lib/api";
+import type { DeploymentScanIssue, DeploymentScanResult } from "@qingnest/shared/deployment/types";
+import { isAcceptedArchive, prepareZipDeployment } from "@/lib/archive";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { EncryptedText } from "@/components/ui/encrypted-text";
 import { FloatingDock, type FloatingDockItem } from "@/components/ui/floating-dock";
@@ -241,6 +246,35 @@ function formatConfirmationExpiry(expiresAt: number) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getRiskLabel(level: DeploymentScanResult["riskLevel"]) {
+  if (level === "high") return "高风险";
+  if (level === "medium") return "需审核";
+  return "低风险";
+}
+
+function getStatusLabel(status: UploadArchiveResult["status"] | SiteDraft["status"]) {
+  if (status === "active") return "已发布";
+  if (status === "pending_review") return "待审核";
+  if (status === "blocked") return "已阻止";
+  return "草稿";
+}
+
+function getIssueClass(issue: DeploymentScanIssue) {
+  if (issue.severity === "error") return "border-rose-300/20 bg-rose-400/10 text-rose-100";
+  if (issue.severity === "warning") return "border-amber-300/20 bg-amber-400/10 text-amber-100";
+  return "border-cyan-300/20 bg-cyan-400/10 text-cyan-100";
+}
+
+function hasBlockingScanIssues(scan: DeploymentScanResult | null) {
+  return Boolean(scan?.issues.some((issue) => issue.severity === "error"));
 }
 
 function getSignupConfirmationNotice(record: SignupConfirmationRecord) {
@@ -757,11 +791,18 @@ function DashboardScreen({
   const [subdomain, setSubdomain] = useState("");
   const [availability, setAvailability] = useState<SubdomainCheck | null>(null);
   const [createdSite, setCreatedSite] = useState<SiteDraft | null>(null);
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [deploymentScan, setDeploymentScan] = useState<DeploymentScanResult | null>(null);
+  const [deploymentSourceRoot, setDeploymentSourceRoot] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<UploadArchiveResult | null>(null);
   const [checking, setChecking] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [scanningArchive, setScanningArchive] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const emailConfirmed = account?.emailConfirmed ?? isSessionEmailConfirmed(session);
+  const scanHasBlockingIssues = hasBlockingScanIssues(deploymentScan);
 
   const roleLabel = account?.role === "admin" ? "管理员" : "用户";
 
@@ -793,6 +834,10 @@ function DashboardScreen({
     setMessage(null);
     setError(null);
     setCreatedSite(null);
+    setArchiveFile(null);
+    setDeploymentScan(null);
+    setDeploymentSourceRoot(null);
+    setPublishResult(null);
 
     if (!emailConfirmed) {
       setError("请先验证邮箱。注册验证邮件有效期为 24 小时，创建站点时不会重复发送。");
@@ -812,6 +857,95 @@ function DashboardScreen({
       setError(text);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleArchiveChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+
+    setMessage(null);
+    setError(null);
+    setArchiveFile(null);
+    setDeploymentScan(null);
+    setDeploymentSourceRoot(null);
+    setPublishResult(null);
+
+    if (!file) return;
+
+    if (!isAcceptedArchive(file)) {
+      setError("请上传 ZIP 格式的静态站点压缩包。");
+      event.target.value = "";
+      return;
+    }
+
+    setScanningArchive(true);
+
+    try {
+      const prepared = await prepareZipDeployment(file, account?.plan ?? "free");
+      setArchiveFile(file);
+      setDeploymentScan(prepared.scan);
+      setDeploymentSourceRoot(prepared.sourceRoot);
+      setMessage("站点包已扫描，可以确认发布。");
+    } catch (scanError) {
+      const text = scanError instanceof Error ? scanError.message : "ZIP 扫描失败";
+      setError(text);
+      event.target.value = "";
+    } finally {
+      setScanningArchive(false);
+    }
+  }
+
+  async function handlePublishArchive() {
+    setMessage(null);
+    setError(null);
+    setPublishResult(null);
+
+    if (!createdSite) {
+      setError("请先创建站点。");
+      return;
+    }
+
+    if (!archiveFile || !deploymentScan) {
+      setError("请先选择并扫描 ZIP 站点包。");
+      return;
+    }
+
+    if (scanHasBlockingIssues) {
+      setError("扫描发现阻断问题，请修正后重新上传。");
+      return;
+    }
+
+    setPublishing(true);
+
+    try {
+      const sessionResult = await createUploadSession({
+        siteId: createdSite.id,
+        scan: deploymentScan
+      });
+
+      if (sessionResult.status === "blocked") {
+        setError("服务端扫描阻止了这个站点包，请修正后重新上传。");
+        return;
+      }
+
+      const result = await uploadArchive({
+        uploadSessionId: sessionResult.uploadSessionId,
+        deploymentId: sessionResult.deploymentId,
+        archive: archiveFile
+      });
+
+      setPublishResult(result);
+      setCreatedSite({
+        ...createdSite,
+        publicUrl: result.publicUrl,
+        status: result.status === "blocked" ? "pending_review" : result.status
+      });
+      setMessage(result.status === "active" ? "站点已发布。" : "站点已提交审核。");
+    } catch (publishError) {
+      const text = publishError instanceof Error ? publishError.message : "发布失败";
+      setError(text);
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -967,12 +1101,102 @@ function DashboardScreen({
             </form>
 
             {createdSite ? (
-              <div className="mt-6 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4">
-                <p className="text-sm font-semibold text-cyan-100">{createdSite.name}</p>
-                <a className="mt-2 block break-all text-sm text-cyan-200 hover:text-white" href={createdSite.publicUrl}>
-                  {createdSite.publicUrl}
-                </a>
-                <p className="mt-2 text-xs font-medium uppercase tracking-normal text-zinc-500">{createdSite.status}</p>
+              <div className="mt-6 space-y-4">
+                <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4">
+                  <p className="text-sm font-semibold text-cyan-100">{createdSite.name}</p>
+                  <a className="mt-2 block break-all text-sm text-cyan-200 hover:text-white" href={createdSite.publicUrl}>
+                    {createdSite.publicUrl}
+                  </a>
+                  <p className="mt-2 text-xs font-medium uppercase tracking-normal text-zinc-500">{getStatusLabel(createdSite.status)}</p>
+                </div>
+
+                <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold tracking-normal text-white">上传静态页面包</h2>
+                      <p className="mt-1 text-sm leading-6 text-zinc-400">选择包含入口 HTML 的 ZIP，扫描通过后发布到当前站点。</p>
+                    </div>
+                    <span className="inline-flex h-9 w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-zinc-300">
+                      <UploadCloud className="h-4 w-4 text-cyan-200" />
+                      ZIP
+                    </span>
+                  </div>
+
+                  <label className="mt-5 grid gap-2 text-sm font-medium text-zinc-200">
+                    站点包
+                    <input
+                      accept=".zip,application/zip,application/x-zip-compressed"
+                      className="block w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-zinc-200 file:mr-4 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-black hover:file:bg-zinc-100 focus:border-cyan-300 focus:outline-none"
+                      disabled={publishing}
+                      onChange={handleArchiveChange}
+                      type="file"
+                    />
+                  </label>
+
+                  {scanningArchive ? (
+                    <p className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-300">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      正在扫描 ZIP
+                    </p>
+                  ) : null}
+
+                  {deploymentScan ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="grid gap-2 sm:grid-cols-4">
+                        {[
+                          ["文件", deploymentScan.fileCount],
+                          ["大小", formatBytes(deploymentScan.totalBytes)],
+                          ["入口", deploymentScan.entrypoint ?? "未找到"],
+                          ["风险", getRiskLabel(deploymentScan.riskLevel)]
+                        ].map(([label, value]) => (
+                          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3" key={label}>
+                            <p className="text-xs font-medium text-zinc-500">{label}</p>
+                            <p className="mt-1 truncate text-sm font-semibold text-zinc-100">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {deploymentSourceRoot ? (
+                        <p className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-3 text-sm leading-6 text-cyan-100">
+                          已自动使用 {deploymentSourceRoot}/ 作为发布目录。
+                        </p>
+                      ) : null}
+
+                      {deploymentScan.issues.length > 0 ? (
+                        <div className="space-y-2">
+                          {deploymentScan.issues.slice(0, 5).map((issue) => (
+                            <p className={cn("rounded-lg border px-3 py-2 text-sm leading-6", getIssueClass(issue))} key={`${issue.code}-${issue.path ?? issue.message}`}>
+                              {issue.path ? `${issue.path}：` : ""}
+                              {issue.message}
+                            </p>
+                          ))}
+                          {deploymentScan.issues.length > 5 ? (
+                            <p className="text-sm text-zinc-500">还有 {deploymentScan.issues.length - 5} 条诊断未显示。</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <button
+                        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-100 disabled:opacity-50 sm:w-fit"
+                        disabled={publishing || scanningArchive || scanHasBlockingIssues}
+                        onClick={handlePublishArchive}
+                        type="button"
+                      >
+                        {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                        发布站点包
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {publishResult ? (
+                    <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4 text-sm leading-6 text-emerald-100">
+                      <p className="font-semibold">{getStatusLabel(publishResult.status)}</p>
+                      <a className="mt-1 block break-all text-emerald-200 hover:text-white" href={publishResult.publicUrl}>
+                        {publishResult.publicUrl}
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>

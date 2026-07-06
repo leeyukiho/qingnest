@@ -284,6 +284,36 @@ async function sendSignupConfirmationEmail(
   }
 }
 
+async function clearSignupConfirmationSendLock(
+  serviceSupabase: ReturnType<typeof createServiceSupabase>,
+  email: string
+) {
+  const { error } = await serviceSupabase
+    .from("auth_email_sends")
+    .delete()
+    .eq("email", email)
+    .eq("purpose", "signup_confirmation");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function rollbackGeneratedSignup(
+  serviceSupabase: ReturnType<typeof createServiceSupabase>,
+  input: { email: string; userId?: string }
+) {
+  if (input.userId) {
+    const { error } = await serviceSupabase.auth.admin.deleteUser(input.userId);
+
+    if (error) {
+      throw new Error(`验证邮件发送失败，且无法清理未完成注册用户：${error.message}`);
+    }
+  }
+
+  await clearSignupConfirmationSendLock(serviceSupabase, input.email);
+}
+
 export async function signUpWithEmailPassword(
   env: Env,
   input: { email?: string; password?: string; redirectTo?: string }
@@ -343,11 +373,7 @@ export async function signUpWithEmailPassword(
   const actionLink = linkData.properties?.action_link;
 
   if (linkError || !actionLink) {
-    await serviceSupabase
-      .from("auth_email_sends")
-      .delete()
-      .eq("email", email)
-      .eq("purpose", "signup_confirmation");
+    await clearSignupConfirmationSendLock(serviceSupabase, email);
 
     throw new Error(getSignUpErrorMessage(linkError?.message ?? "无法生成邮箱验证链接"));
   }
@@ -359,11 +385,10 @@ export async function signUpWithEmailPassword(
       expiresAt: claim.expires_at
     });
   } catch (sendError) {
-    await serviceSupabase
-      .from("auth_email_sends")
-      .delete()
-      .eq("email", email)
-      .eq("purpose", "signup_confirmation");
+    await rollbackGeneratedSignup(serviceSupabase, {
+      email,
+      userId: linkData.user?.id
+    });
 
     throw sendError;
   }
