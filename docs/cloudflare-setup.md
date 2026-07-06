@@ -13,10 +13,10 @@ Worker name:   <worker-name>
 R2 bucket:     <r2-bucket-name>
 KV namespace:  <kv-namespace-name>
 KV id:         <kv-namespace-id>
-Root zone:     <example.com>
-Console host:  <app.example.com>
-User route:    <*.sites.example.com/*>
-API route:     <app.example.com/api/*>
+Root zone:     985201314.xyz
+Console host:  app.985201314.xyz
+User route:    *.985201314.xyz/*
+API route:     app.985201314.xyz/api/*
 ```
 
 ## Pages Git Deployment
@@ -38,8 +38,8 @@ NODE_VERSION=20
 VITE_SUPABASE_URL=<supabase-project-url>
 VITE_SUPABASE_ANON_KEY=<supabase-public-anon-or-publishable-key>
 VITE_API_BASE_URL=
-VITE_APP_HOST=<app.example.com>
-VITE_DISTRIBUTION_ROOT=<sites.example.com>
+VITE_APP_HOST=app.985201314.xyz
+VITE_DISTRIBUTION_ROOT=985201314.xyz
 VITE_PUBLIC_PROTOCOL=https
 ```
 
@@ -52,16 +52,21 @@ Never set `SUPABASE_SERVICE_ROLE_KEY` in Pages.
 Create a Worker connected to GitHub.
 
 ```text
-Entry file: apps/worker/src/index.ts
+Production branch: main
+Root directory:    /
+Build variable:    NODE_VERSION=22
+Build command:     npm run typecheck
+Deploy command:    npx wrangler deploy apps/worker/src/index.ts --name <worker-name> --compatibility-date <yyyy-mm-dd> --keep-vars
+Non-production branch deploy command:
+  npx wrangler versions upload apps/worker/src/index.ts --name <worker-name> --compatibility-date <yyyy-mm-dd> --keep-vars
 ```
 
-If the dashboard asks for commands:
+Do not set an `Install command` for Worker builds. Workers Builds uses Build command, Deploy command,
+Non-production branch deploy command, and Root directory.
 
-```text
-Install command: npm ci
-Build command:   npm run typecheck
-Deploy command:  npx wrangler deploy apps/worker/src/index.ts --name <worker-name> --compatibility-date <yyyy-mm-dd> --keep-vars
-```
+Keep Root directory as `/` because the root `package.json`, `package-lock.json`, and workspace packages
+are needed. The Worker entry point is passed in the deploy commands as `apps/worker/src/index.ts`.
+Set `NODE_VERSION=22` as a build variable, not as a Worker runtime variable.
 
 This repository does not commit `apps/worker/wrangler.toml`. Configure Worker variables, secrets,
 bindings, and routes in the Cloudflare dashboard.
@@ -72,9 +77,11 @@ Plain variable:
 
 ```text
 ENVIRONMENT=production
-APP_HOST=<app.example.com>
-DISTRIBUTION_ROOT=<sites.example.com>
+APP_HOST=app.985201314.xyz
+DISTRIBUTION_ROOT=985201314.xyz
 PUBLIC_PROTOCOL=https
+RESEND_FROM_EMAIL=noreply@985201314.xyz
+RESEND_FROM_NAME=QingNest 轻巢
 ```
 
 Secrets:
@@ -83,9 +90,10 @@ Secrets:
 SUPABASE_URL=<supabase-project-url>
 SUPABASE_ANON_KEY=<supabase-public-anon-or-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
+RESEND_API_KEY=<resend-api-key>
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` must only be a Worker secret.
+`SUPABASE_SERVICE_ROLE_KEY` and `RESEND_API_KEY` must only be Worker secrets.
 
 ## Worker Bindings
 
@@ -109,8 +117,10 @@ Namespace ID:  <kv-namespace-id>
 Configure these in `Worker` -> `Settings` -> `Domains & Routes`:
 
 ```text
-<*.sites.example.com/*>     -> <worker-name>
-<app.example.com/api/*>     -> <worker-name>
+app.985201314.xyz/api/*     -> <worker-name>
+app.985201314.xyz/*         -> no Worker / bypass to Pages
+*.985201314.xyz/*           -> <worker-name>
 ```
 
 The console API route is needed when `VITE_API_BASE_URL` is empty.
+The console bypass route prevents the wildcard user-site route from taking over the Pages console.

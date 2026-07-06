@@ -14,6 +14,7 @@
     "moduleResolution": "Node",
     "baseUrl": ".",
     "paths": {
+      "@/*": ["apps/web/src/*"],
       "@qingnest/shared/*": ["packages/shared/src/*"]
     },
     "resolveJsonModule": true,

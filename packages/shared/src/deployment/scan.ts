@@ -8,7 +8,7 @@ export type ScanInputFile = {
   text?: string;
 };
 
-function normalizePath(path: string) {
+export function normalizeDeploymentPath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
@@ -17,11 +17,18 @@ function isPathTraversal(path: string) {
 }
 
 function startsWithBlockedPath(path: string) {
-  const normalized = normalizePath(path).toLowerCase();
+  const normalized = normalizeDeploymentPath(path).toLowerCase();
   return platformConfig.deployment.blockedPaths.some((blockedPath) => {
     const blocked = blockedPath.toLowerCase();
     return blocked.endsWith("/") ? normalized.startsWith(blocked) : normalized === blocked || normalized.endsWith(`/${blocked}`);
   });
+}
+
+function normalizeFiles<T extends ScanInputFile>(inputFiles: T[]) {
+  return inputFiles.map((file) => ({
+    ...file,
+    path: normalizeDeploymentPath(file.path)
+  }));
 }
 
 function scoreHtmlRisk(file: ScanInputFile) {
@@ -92,12 +99,12 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
   const plan = getPlanConfig(planName);
   const issues: DeploymentScanIssue[] = [];
   const files: DeploymentFile[] = [];
-  const paths = inputFiles.map((file) => normalizePath(file.path));
+  const paths = inputFiles.map((file) => normalizeDeploymentPath(file.path));
   let totalBytes = 0;
   let riskScore = 0;
 
   for (const inputFile of inputFiles) {
-    const path = normalizePath(inputFile.path);
+    const path = normalizeDeploymentPath(inputFile.path);
     totalBytes += inputFile.size;
 
     if (!path || isPathTraversal(path)) {
@@ -217,5 +224,34 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
     riskLevel,
     issues,
     files
+  };
+}
+
+export function prepareDeploymentFiles<T extends ScanInputFile>(inputFiles: T[], planName = "free") {
+  const normalizedFiles = normalizeFiles(inputFiles);
+  const rootScan = scanDeploymentFiles(normalizedFiles, planName);
+
+  if (rootScan.entrypoint || !rootScan.suggestedOutputDirectory) {
+    return {
+      files: normalizedFiles,
+      sourceRoot: null,
+      scan: rootScan
+    };
+  }
+
+  const sourceRoot = rootScan.suggestedOutputDirectory;
+  const prefix = `${sourceRoot}/`;
+  const files = normalizedFiles
+    .filter((file) => file.path.startsWith(prefix))
+    .map((file) => ({
+      ...file,
+      path: file.path.slice(prefix.length)
+    }))
+    .filter((file) => file.path.length > 0);
+
+  return {
+    files,
+    sourceRoot,
+    scan: scanDeploymentFiles(files, planName)
   };
 }

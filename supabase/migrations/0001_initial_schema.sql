@@ -292,7 +292,6 @@ grant select, insert, update, delete on table
   public.abuse_reports
 to service_role;
 
-create index if not exists domains_hostname_idx on public.domains(hostname);
 create index if not exists sites_user_status_idx on public.sites(user_id, status);
 create index if not exists sites_active_deployment_id_idx on public.sites(active_deployment_id);
 create index if not exists domains_site_id_idx on public.domains(site_id);

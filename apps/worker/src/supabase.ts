@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Env } from "./types";
 
 type EmptyRelationships = [];
+export type ProfileRole = "user" | "admin";
 
 export type Database = {
   public: {
@@ -11,17 +12,44 @@ export type Database = {
           id: string;
           email: string;
           plan: string;
+          role: ProfileRole;
           created_at: string;
         };
         Insert: {
           id: string;
           email: string;
           plan?: string;
+          role?: ProfileRole;
           created_at?: string;
         };
         Update: {
           email?: string;
           plan?: string;
+          role?: ProfileRole;
+        };
+        Relationships: EmptyRelationships;
+      };
+      auth_email_sends: {
+        Row: {
+          email: string;
+          purpose: "signup_confirmation";
+          sent_at: string;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          email: string;
+          purpose: "signup_confirmation";
+          sent_at?: string;
+          expires_at: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          sent_at?: string;
+          expires_at?: string;
+          updated_at?: string;
         };
         Relationships: EmptyRelationships;
       };
@@ -206,7 +234,19 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      claim_signup_confirmation_email: {
+        Args: {
+          p_email: string;
+          p_ttl_seconds?: number;
+        };
+        Returns: {
+          claimed: boolean;
+          sent_at: string;
+          expires_at: string;
+        }[];
+      };
+    };
     CompositeTypes: Record<string, never>;
   };
 };

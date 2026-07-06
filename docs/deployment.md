@@ -12,9 +12,9 @@ Pages project: <pages-project-name>
 Worker name:   <worker-name>
 R2 bucket:     <r2-bucket-name>
 KV namespace:  <kv-namespace-name>
-User route:    <*.sites.example.com/*>
-Console host:  <app.example.com>
-API route:     <app.example.com/api/*>
+User route:    *.985201314.xyz/*
+Console host:  app.985201314.xyz
+API route:     app.985201314.xyz/api/*
 ```
 
 Supabase:
@@ -47,27 +47,36 @@ NODE_VERSION=20
 VITE_SUPABASE_URL=<supabase-project-url>
 VITE_SUPABASE_ANON_KEY=<supabase-public-anon-or-publishable-key>
 VITE_API_BASE_URL=
-VITE_APP_HOST=<app.example.com>
-VITE_DISTRIBUTION_ROOT=<sites.example.com>
+VITE_APP_HOST=app.985201314.xyz
+VITE_DISTRIBUTION_ROOT=985201314.xyz
 VITE_PUBLIC_PROTOCOL=https
 ```
 
 Worker:
 
 ```text
-Entry file: apps/worker/src/index.ts
+Production branch: main
+Root directory: /
+Build variable: NODE_VERSION=22
+Build command: npm run typecheck
+Deploy command: npx wrangler deploy apps/worker/src/index.ts --name <worker-name> --compatibility-date <yyyy-mm-dd> --keep-vars
+Non-production branch deploy command:
+  npx wrangler versions upload apps/worker/src/index.ts --name <worker-name> --compatibility-date <yyyy-mm-dd> --keep-vars
 ENVIRONMENT=production
-APP_HOST=<app.example.com>
-DISTRIBUTION_ROOT=<sites.example.com>
+APP_HOST=app.985201314.xyz
+DISTRIBUTION_ROOT=985201314.xyz
 PUBLIC_PROTOCOL=https
+RESEND_FROM_EMAIL=noreply@985201314.xyz
+RESEND_FROM_NAME=QingNest 轻巢
 SUPABASE_URL=<supabase-project-url>
 SUPABASE_ANON_KEY=<supabase-public-anon-or-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
+RESEND_API_KEY=<resend-api-key>
 R2 binding: SITE_ASSETS -> <r2-bucket-name>
 KV binding: DOMAIN_MAP -> <kv-namespace-name>
 ```
 
-Never put `SUPABASE_SERVICE_ROLE_KEY` in Pages or any `VITE_` variable.
+Never put `SUPABASE_SERVICE_ROLE_KEY` or `RESEND_API_KEY` in Pages or any `VITE_` variable.
 
 ## Preflight Checks
 

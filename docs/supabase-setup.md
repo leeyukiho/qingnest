@@ -21,7 +21,8 @@ npx supabase link --project-ref your-project-ref
 npm run supabase:db:push
 ```
 
-If you do not want to use CLI auth, open the Supabase SQL Editor and run:
+If you do not want to use CLI auth, open the Supabase SQL Editor and run every file in
+`supabase/migrations` in filename order. The first file is:
 
 ```text
 supabase/migrations/0001_initial_schema.sql
@@ -47,6 +48,7 @@ It also configures:
 ```text
 pgcrypto extension
 Auth user -> profile trigger
+profile roles
 updated_at trigger for sites
 RLS on every public table
 explicit Data API GRANTs for anon/authenticated/service_role
@@ -75,14 +77,75 @@ browser code, or any `VITE_` variable.
 Set public Supabase variables in Cloudflare Pages:
 
 ```text
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_URL=https://clxgkoxnylybvkwtviwr.supabase.co
 VITE_SUPABASE_ANON_KEY=your-public-anon-or-publishable-key
-VITE_APP_HOST=app.example.com
-VITE_DISTRIBUTION_ROOT=sites.example.com
+VITE_APP_HOST=app.985201314.xyz
+VITE_DISTRIBUTION_ROOT=985201314.xyz
 VITE_PUBLIC_PROTOCOL=https
 ```
 
 The frontend uses these for Supabase Auth and passes the user's access token to the Worker.
+
+## Auth Email Verification
+
+Public email signup is disabled in `supabase/config.toml`. Registration is handled by the Worker:
+
+```text
+Pages -> Worker /api/auth/sign-up -> Supabase Admin generateLink -> Resend API
+```
+
+Confirmation links expire after 24 hours (`otp_expiry = 86400`). The Worker stores a per-email
+signup send lock for the same 24-hour window so a user cannot trigger duplicate confirmation emails
+from another browser or device. The Worker also rejects site creation and upload-session operations
+unless the Supabase user token has a confirmed email.
+
+Set these secrets/variables in the Worker environment, not in public Pages variables:
+
+```text
+RESEND_API_KEY=<resend-api-key>
+RESEND_FROM_EMAIL=noreply@985201314.xyz
+RESEND_FROM_NAME=QingNest 轻巢
+```
+
+Hosted Supabase projects must also disable public signup in Dashboard -> Authentication -> Providers
+so direct calls to `/auth/v1/signup` cannot bypass the Worker.
+
+## Roles
+
+`profiles.role` distinguishes regular users from admins:
+
+```text
+user
+admin
+```
+
+New profiles default to `user`. Do not expose role updates to the browser. Promote an account from
+the Supabase SQL Editor or a trusted backend path:
+
+```sql
+update public.profiles
+set role = 'admin'
+where email = 'admin@example.com';
+```
+
+## Free Plan Guardrails
+
+The app keeps QingNest's own free tier below Supabase's free project envelope by enforcing compact
+application-level limits in `packages/shared/config/platform.json`:
+
+```text
+maxSites=3
+maxStorageBytes=150 MB
+maxDeploymentsPerDay=20
+maxUploadSessionsPerHour=10
+maxSiteBytes=50 MB
+maxFileBytes=10 MB
+```
+
+To change domain blacklist/manual-review rules, edit `subdomainPolicy.reserved` and
+`subdomainPolicy.manualReviewKeywords` in `packages/shared/config/platform.json`. To change upload
+size or quota limits, edit the relevant `plans.free.quotas` values in the same file. Keep these
+limits conservative unless you upgrade Supabase, R2, and Worker capacity together.
 
 ## Local Files
 

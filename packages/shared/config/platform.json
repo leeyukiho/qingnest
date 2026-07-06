@@ -2,12 +2,12 @@
   "brand": {
     "name": "QingNest",
     "cnName": "轻巢",
-    "supportEmail": "support@example.com",
-    "abuseEmail": "abuse@example.com"
+    "supportEmail": "support@985201314.xyz",
+    "abuseEmail": "abuse@985201314.xyz"
   },
   "domains": {
-    "appHost": "app.example.com",
-    "distributionRoot": "sites.example.com",
+    "appHost": "app.985201314.xyz",
+    "distributionRoot": "985201314.xyz",
     "publicProtocol": "https"
   },
   "subdomainPolicy": {

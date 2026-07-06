@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     resolve: {
       alias: {
+        "@": path.resolve(repoRoot, "apps/web/src"),
         "@qingnest/shared": path.resolve(repoRoot, "packages/shared/src")
       }
     },

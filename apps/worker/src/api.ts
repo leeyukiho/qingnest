@@ -2,7 +2,16 @@ import { scanDeploymentFiles } from "@qingnest/shared/deployment/scan";
 import { getPublicSiteUrl, validateSubdomain } from "@qingnest/shared/config/platform";
 import { json, problem, readJson } from "./http";
 import { getWorkerPlatformConfig } from "./platform";
-import { checkSubdomainAvailability, createDraftSite, createUploadSession, getAuthenticatedUser } from "./state";
+import {
+  checkSubdomainAvailability,
+  completeArchiveUpload,
+  createDraftSite,
+  createUploadSession,
+  getAccountProfile,
+  getAdminOverview,
+  getAuthenticatedUser,
+  signUpWithEmailPassword
+} from "./state";
 import { hasServiceSupabase } from "./supabase";
 import type { Env } from "./types";
 import type { DeploymentScanResult } from "@qingnest/shared/deployment/types";
@@ -17,8 +26,22 @@ type UploadSessionInput = {
   scan?: DeploymentScanResult;
 };
 
-async function maybeGetUser(request: Request, env: Env) {
-  return hasServiceSupabase(env) ? await getAuthenticatedUser(request, env) : undefined;
+type SignUpInput = {
+  email?: string;
+  password?: string;
+  redirectTo?: string;
+};
+
+function isUploadedFile(value: unknown): value is File {
+  return typeof value === "object" && value !== null && "arrayBuffer" in value && "name" in value;
+}
+
+async function maybeGetUser(
+  request: Request,
+  env: Env,
+  options: { requireEmailConfirmed?: boolean } = {}
+) {
+  return hasServiceSupabase(env) ? await getAuthenticatedUser(request, env, options) : undefined;
 }
 
 export async function handleApi(request: Request, env: Env) {
@@ -43,6 +66,31 @@ export async function handleApi(request: Request, env: Env) {
           free: platformConfig.plans.free
         }
       });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/auth/sign-up") {
+      const input = await readJson<SignUpInput>(request);
+      return json(await signUpWithEmailPassword(env, input), { status: 201 });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/me") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: false });
+
+      if (!user) {
+        return problem("请先登录", 401);
+      }
+
+      return json(await getAccountProfile(env, user));
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/admin/overview") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+
+      if (!user) {
+        return problem("请先登录", 401);
+      }
+
+      return json(await getAdminOverview(env, user));
     }
 
     if (request.method === "GET" && url.pathname === "/api/subdomains/check") {
@@ -114,10 +162,43 @@ export async function handleApi(request: Request, env: Env) {
       return json(result, { status: 201 });
     }
 
+    const uploadArchiveMatch = url.pathname.match(/^\/api\/upload-sessions\/([^/]+)\/archive$/);
+
+    if (request.method === "POST" && uploadArchiveMatch) {
+      const uploadSessionId = decodeURIComponent(uploadArchiveMatch[1] ?? "");
+      const formData = await request.formData();
+      const deploymentId = formData.get("deploymentId");
+      const archive = formData.get("archive");
+
+      if (typeof deploymentId !== "string" || !deploymentId) {
+        return problem("缺少部署 ID");
+      }
+
+      if (!isUploadedFile(archive)) {
+        return problem("缺少 ZIP 文件");
+      }
+
+      const user = await maybeGetUser(request, env);
+      const result = await completeArchiveUpload(env, {
+        uploadSessionId,
+        deploymentId,
+        archive,
+        user
+      });
+      return json(result, { status: 201 });
+    }
+
     return problem("接口不存在", 404);
   } catch (error) {
     const message = error instanceof Error ? error.message : "服务异常";
-    const status = message.includes("登录") ? 401 : 500;
+    const status =
+      message.includes("管理员") || message.includes("邮箱") || message.includes("无权")
+        ? 403
+        : message.includes("登录") || message.includes("过期")
+          ? 401
+          : message.includes("套餐")
+            ? 429
+            : 500;
     return problem(message, status);
   }
 }

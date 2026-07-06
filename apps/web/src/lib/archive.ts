@@ -1,5 +1,5 @@
 import { unzipSync } from "fflate";
-import { scanDeploymentFiles, type ScanInputFile } from "@qingnest/shared/deployment/scan";
+import { prepareDeploymentFiles, type ScanInputFile } from "@qingnest/shared/deployment/scan";
 import { platformConfig } from "@qingnest/shared/config/platform";
 
 const textPreviewExtensions = new Set([".html", ".htm", ".js", ".mjs", ".css", ".json", ".txt"]);
@@ -19,6 +19,10 @@ function decodePreview(path: string, bytes: Uint8Array) {
 }
 
 export async function scanZipFile(file: File, planName = "free") {
+  return (await prepareZipDeployment(file, planName)).scan;
+}
+
+export async function prepareZipDeployment(file: File, planName = "free") {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const entries = unzipSync(bytes);
   const files: ScanInputFile[] = [];
@@ -35,7 +39,7 @@ export async function scanZipFile(file: File, planName = "free") {
     });
   }
 
-  return scanDeploymentFiles(files, planName);
+  return prepareDeploymentFiles(files, planName);
 }
 
 export function isAcceptedArchive(file: File) {
