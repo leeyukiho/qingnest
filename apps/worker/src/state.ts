@@ -188,7 +188,7 @@ function getSignUpErrorMessage(message: string) {
 }
 
 function getResendFrom(env: Env) {
-  const email = env.RESEND_FROM_EMAIL || "noreply@985201314.xyz";
+  const email = env.RESEND_FROM_EMAIL || "noreply@mail.985201314.xyz";
   const name = env.RESEND_FROM_NAME || "QingNest 轻巢";
 
   return `${name} <${email}>`;

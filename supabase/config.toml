@@ -230,8 +230,9 @@ web3 = 30
 # secret = ""
 
 [auth.email]
-# Allow/disallow public email signups. Registration is handled by the Worker with service-role Admin APIs.
-enable_signup = false
+# Keep the email provider enabled so verified users can sign in with a password.
+# Public signup remains disabled globally by auth.enable_signup = false.
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
@@ -254,7 +255,7 @@ host = "smtp.resend.com"
 port = 587
 user = "resend"
 pass = ""
-admin_email = "noreply@985201314.xyz"
+admin_email = "noreply@mail.985201314.xyz"
 sender_name = "QingNest 轻巢"
 
 # Uncomment to customize notification email template

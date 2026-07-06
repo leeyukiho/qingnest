@@ -88,7 +88,9 @@ The frontend uses these for Supabase Auth and passes the user's access token to 
 
 ## Auth Email Verification
 
-Public email signup is disabled in `supabase/config.toml`. Registration is handled by the Worker:
+Public signup is disabled globally in `supabase/config.toml`, while the Email provider remains
+enabled so verified users can still sign in with email and password. Registration is handled by the
+Worker:
 
 ```text
 Pages -> Worker /api/auth/sign-up -> Supabase Admin generateLink -> Resend API
@@ -103,12 +105,13 @@ Set these secrets/variables in the Worker environment, not in public Pages varia
 
 ```text
 RESEND_API_KEY=<resend-api-key>
-RESEND_FROM_EMAIL=noreply@985201314.xyz
+RESEND_FROM_EMAIL=noreply@mail.985201314.xyz
 RESEND_FROM_NAME=QingNest 轻巢
 ```
 
-Hosted Supabase projects must also disable public signup in Dashboard -> Authentication -> Providers
-so direct calls to `/auth/v1/signup` cannot bypass the Worker.
+Hosted Supabase projects must leave the Email provider enabled in Dashboard -> Authentication ->
+Sign In / Providers -> Email. Disable public signup with the global signup setting instead; turning
+off the Email provider causes password login to fail with `Email logins are disabled`.
 
 ## Roles
 
