@@ -32,6 +32,8 @@ type DeployableArchiveFile = ScanInputFile & {
   content: Uint8Array;
 };
 
+type PreparedDeployment = ReturnType<typeof prepareDeploymentFiles<DeployableArchiveFile>>;
+
 export type AuthenticatedUser = {
   id: string;
   email: string;
@@ -67,6 +69,35 @@ const draftSites = new Map<string, DraftSite>();
 const claimedSubdomains = new Set<string>();
 const memoryUploadSessions = new Map<string, MemoryUploadSession>();
 const textPreviewExtensions = new Set([".html", ".htm", ".js", ".mjs", ".css", ".json", ".txt"]);
+
+function getSiteAssets(env: Env) {
+  if (!env.SITE_ASSETS) {
+    throw new Error("SITE_ASSETS R2 binding is not configured");
+  }
+
+  return env.SITE_ASSETS;
+}
+
+async function readDomainCache(env: Env, subdomain: string) {
+  if (!env.DOMAIN_MAP) {
+    return null;
+  }
+
+  return env.DOMAIN_MAP.get(subdomain).catch(() => null);
+}
+
+async function writeDomainCache(env: Env, subdomain: string, mapping: DomainMapping) {
+  if (!env.DOMAIN_MAP) {
+    return false;
+  }
+
+  try {
+    await env.DOMAIN_MAP.put(subdomain, JSON.stringify(mapping));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function getSiteUrl(env: Env, subdomain: string) {
   return getPublicSiteUrl(subdomain, getWorkerPlatformConfig(env).domains);
@@ -126,9 +157,28 @@ async function readDeployableArchive(archive: File) {
   return prepareDeploymentFiles(files, "free");
 }
 
+async function readDeployableFiles(files: Array<{ file: File; path: string }>) {
+  const deployableFiles: DeployableArchiveFile[] = await Promise.all(
+    files.map(async ({ file, path }) => {
+      const content = new Uint8Array(await file.arrayBuffer());
+
+      return {
+        path,
+        size: content.byteLength,
+        text: decodePreview(path, content),
+        content
+      };
+    })
+  );
+
+  return prepareDeploymentFiles(deployableFiles, "free");
+}
+
 async function putDeploymentFiles(env: Env, r2Prefix: string, files: DeployableArchiveFile[]) {
+  const siteAssets = getSiteAssets(env);
+
   for (const file of files) {
-    await env.SITE_ASSETS.put(`${r2Prefix}/${file.path}`, file.content, {
+    await siteAssets.put(`${r2Prefix}/${file.path}`, file.content, {
       httpMetadata: {
         contentType: getContentType(file.path)
       }
@@ -531,10 +581,11 @@ export async function checkSubdomainAvailability(env: Env, subdomain: string) {
   }
 
   const hostname = getDistributionHostname(env, validation.normalized);
-  const cached = claimedSubdomains.has(validation.normalized)
-    ? "claimed"
-    : await env.DOMAIN_MAP.get(validation.normalized).catch(() => null);
-  const existing = cached ?? (hasServiceSupabase(env) ? await findDomainByHostname(env, hostname) : null);
+  const existing = hasServiceSupabase(env)
+    ? await findDomainByHostname(env, hostname)
+    : claimedSubdomains.has(validation.normalized)
+      ? "claimed"
+      : await readDomainCache(env, validation.normalized);
 
   return {
     available: !existing,
@@ -1089,12 +1140,12 @@ async function refreshDeploymentFiles(env: Env, deploymentId: string, scan: Depl
   }
 }
 
-async function completePersistentArchiveUpload(
+async function completePersistentDeploymentUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; archive: File; user: AuthenticatedUser }
+  input: { uploadSessionId: string; deploymentId: string; prepared: PreparedDeployment; user: AuthenticatedUser }
 ): Promise<UploadArchiveResult> {
   const target = await getPersistentUploadTarget(env, input);
-  const prepared = await readDeployableArchive(input.archive);
+  const prepared = input.prepared;
   const supabase = createServiceSupabase(env);
 
   if (hasBlockingIssues(prepared.scan.issues)) {
@@ -1168,13 +1219,13 @@ async function completePersistentArchiveUpload(
     status: finalStatus
   };
 
-  await env.DOMAIN_MAP.put(target.subdomain, JSON.stringify(mapping));
+  await writeDomainCache(env, target.subdomain, mapping);
   return resultFromScan(target, prepared.scan, finalStatus);
 }
 
-async function completeMemoryArchiveUpload(
+async function completeMemoryDeploymentUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; archive: File }
+  input: { uploadSessionId: string; deploymentId: string; prepared: PreparedDeployment }
 ): Promise<UploadArchiveResult> {
   const session = memoryUploadSessions.get(input.uploadSessionId);
 
@@ -1203,7 +1254,7 @@ async function completeMemoryArchiveUpload(
     status: session.status === "pending_review" ? "pending_review" : "uploading",
     spaFallbackEnabled: session.spaFallbackEnabled
   };
-  const prepared = await readDeployableArchive(input.archive);
+  const prepared = input.prepared;
 
   if (hasBlockingIssues(prepared.scan.issues)) {
     session.status = "blocked";
@@ -1224,15 +1275,20 @@ async function completeMemoryArchiveUpload(
     status: finalStatus
   };
 
-  await env.DOMAIN_MAP.put(target.subdomain, JSON.stringify(mapping));
+  const cached = await writeDomainCache(env, target.subdomain, mapping);
+
+  if (!cached && !hasServiceSupabase(env)) {
+    throw new Error("DOMAIN_MAP KV binding is not configured");
+  }
+
   memoryUploadSessions.delete(input.uploadSessionId);
 
   return resultFromScan(target, prepared.scan, finalStatus);
 }
 
-export async function completeArchiveUpload(
+async function completeDeploymentUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; archive: File; user?: AuthenticatedUser }
+  input: { uploadSessionId: string; deploymentId: string; prepared: PreparedDeployment; user?: AuthenticatedUser }
 ) {
   if (hasServiceSupabase(env)) {
     if (!input.user) {
@@ -1240,20 +1296,44 @@ export async function completeArchiveUpload(
     }
 
     assertEmailConfirmed(input.user);
-    return completePersistentArchiveUpload(env, {
+    return completePersistentDeploymentUpload(env, {
       uploadSessionId: input.uploadSessionId,
       deploymentId: input.deploymentId,
-      archive: input.archive,
+      prepared: input.prepared,
       user: input.user
     });
   }
 
-  return completeMemoryArchiveUpload(env, input);
+  return completeMemoryDeploymentUpload(env, input);
+}
+
+export async function completeArchiveUpload(
+  env: Env,
+  input: { uploadSessionId: string; deploymentId: string; archive: File; user?: AuthenticatedUser }
+) {
+  return completeDeploymentUpload(env, {
+    uploadSessionId: input.uploadSessionId,
+    deploymentId: input.deploymentId,
+    prepared: await readDeployableArchive(input.archive),
+    user: input.user
+  });
+}
+
+export async function completeFilesUpload(
+  env: Env,
+  input: { uploadSessionId: string; deploymentId: string; files: Array<{ file: File; path: string }>; user?: AuthenticatedUser }
+) {
+  return completeDeploymentUpload(env, {
+    uploadSessionId: input.uploadSessionId,
+    deploymentId: input.deploymentId,
+    prepared: await readDeployableFiles(input.files),
+    user: input.user
+  });
 }
 
 export async function getDomainMapping(env: Env, hostname: string) {
   const subdomain = hostname.split(".")[0] ?? "";
-  const value = await env.DOMAIN_MAP.get(subdomain);
+  const value = await readDomainCache(env, subdomain);
 
   if (value) {
     return JSON.parse(value) as DomainMapping;
@@ -1305,6 +1385,6 @@ export async function getDomainMapping(env: Env, hostname: string) {
     status: domain.status === "blocked" || deployment.status === "blocked" ? "blocked" : "active"
   };
 
-  await env.DOMAIN_MAP.put(subdomain, JSON.stringify(mapping)).catch(() => undefined);
+  await writeDomainCache(env, subdomain, mapping);
   return mapping;
 }

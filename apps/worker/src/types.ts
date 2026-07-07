@@ -3,14 +3,14 @@ export type Env = {
   APP_HOST?: string;
   DISTRIBUTION_ROOT?: string;
   PUBLIC_PROTOCOL?: "http" | "https";
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;
-  RESEND_API_KEY: string;
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
   RESEND_FROM_NAME?: string;
-  SITE_ASSETS: R2Bucket;
-  DOMAIN_MAP: KVNamespace;
+  SITE_ASSETS?: R2Bucket;
+  DOMAIN_MAP?: KVNamespace;
 };
 
 export type ApiResponse<T> = {

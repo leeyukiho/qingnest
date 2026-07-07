@@ -29,6 +29,7 @@ import {
   setAccessTokenProvider,
   signUpWithEmailPassword,
   uploadArchive,
+  uploadFiles,
   type AccountProfile,
   type AdminOverview,
   type SignUpConfirmationResult,
@@ -36,8 +37,9 @@ import {
   type SubdomainCheck,
   type UploadArchiveResult
 } from "@/lib/api";
+import { getPlanConfig, validateSubdomain } from "@qingnest/shared/config/platform";
 import type { DeploymentScanIssue, DeploymentScanResult } from "@qingnest/shared/deployment/types";
-import { isAcceptedArchive, prepareZipDeployment } from "@/lib/archive";
+import { isAcceptedArchive, prepareProjectDeployment, type PreparedUploadFile, type SelectedUploadFile } from "@/lib/archive";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { EncryptedText } from "@/components/ui/encrypted-text";
 import { FileUpload } from "@/components/ui/file-upload";
@@ -220,7 +222,7 @@ function getAuthStatus(search: string): AuthStatus {
 
 function getAuthErrorMessage(message: string) {
   if (/email not confirmed/i.test(message)) {
-    return "邮箱还没有验证。请在 24 小时内打开注册邮件中的验证链接，验证后再登录。";
+    return "邮箱未验证，请先完成邮件验证后登录。";
   }
 
   if (/invalid login credentials/i.test(message)) {
@@ -338,6 +340,18 @@ function hasBlockingScanIssues(scan: DeploymentScanResult | null) {
 
 function getSignupConfirmationNotice() {
   return "验证邮件已发送，请完成邮箱验证后登录。";
+}
+
+function getPlanDisplayName(planName: string) {
+  if (planName === "free") return "免费版";
+  if (planName === "starter") return "入门版";
+  if (planName === "pro") return "专业版";
+  return planName;
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
 }
 
 function SiteNavbar({
@@ -470,9 +484,7 @@ function QingNestMark({
           onNearComplete={onVanishComplete}
           text="QingNest"
           vanishing={vanishing}
-        >
-          <TextHoverEffect revealRadius={540} text="QingNest" />
-        </VanishingText>
+        />
       </motion.div>
       <BrandSignal />
     </motion.div>
@@ -618,7 +630,7 @@ function StepsScreen() {
       >
         <motion.div
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-3xl"
+          className="mx-auto max-w-3xl text-center"
           initial={{ opacity: 0, y: 22 }}
           transition={{ duration: 0.48, ease: "easeOut" }}
         >
@@ -629,14 +641,14 @@ function StepsScreen() {
           <h2 className="mt-4 text-[clamp(2rem,5vw,4.75rem)] font-bold leading-none tracking-normal text-white">
             上传、检查、发布
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base sm:leading-7">
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base sm:leading-7">
             选择一个永久域名，上传包含入口 HTML 的 ZIP，扫描通过后即可发布。
           </p>
         </motion.div>
 
         <motion.div
           animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4"
+          className="grid w-full grid-cols-1 gap-3 md:grid-cols-3 md:gap-4"
           initial={{ opacity: 0, y: 26 }}
           transition={{ delay: 0.12, duration: 0.5, ease: "easeOut" }}
         >
@@ -647,7 +659,7 @@ function StepsScreen() {
             return (
               <motion.article
                 className={cn(
-                  "glass-surface grid min-h-[6.4rem] grid-cols-[2.5rem_1fr] items-start gap-x-4 gap-y-1 rounded-lg p-4 outline-none transition-colors duration-300 md:flex md:min-h-56 md:flex-col md:justify-between md:gap-4 md:p-6",
+                  "glass-surface flex min-h-[8.5rem] flex-col items-center justify-center gap-3 rounded-lg p-4 text-center outline-none transition-colors duration-300 md:min-h-56 md:justify-between md:gap-4 md:p-6",
                   isActive ? "is-active border-white/20" : null
                 )}
                 key={step.title}
@@ -656,7 +668,7 @@ function StepsScreen() {
                 tabIndex={0}
                 whileHover={{ y: -6 }}
               >
-                <div className="flex w-full items-center justify-between gap-3 md:items-start">
+                <div className="relative flex w-full items-center justify-center">
                   <span
                     className={cn(
                       "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border md:h-12 md:w-12",
@@ -665,10 +677,12 @@ function StepsScreen() {
                   >
                     <Icon aria-hidden="true" className="h-5 w-5 md:h-6 md:w-6" strokeWidth={1.9} />
                   </span>
-                  <span className="hidden text-sm font-semibold text-zinc-500 md:inline">0{index + 1}</span>
+                  <span className="absolute right-0 top-1 hidden text-sm font-semibold text-zinc-500 md:inline">
+                    0{index + 1}
+                  </span>
                 </div>
-                <div className="min-w-0 flex-1 md:flex-none">
-                  <div className="mb-1 flex items-center gap-2 md:hidden">
+                <div className="min-w-0 md:flex-none">
+                  <div className="mb-1 flex items-center justify-center gap-2 md:hidden">
                     <span className="text-xs font-semibold text-zinc-500">0{index + 1}</span>
                     {isActive ? (
                       <Check
@@ -706,7 +720,7 @@ function PricingScreen({ onStart }: { onStart: () => void }) {
       >
         <motion.div
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-3xl"
+          className="mx-auto max-w-3xl text-center"
           initial={{ opacity: 0, y: 22 }}
           transition={{ duration: 0.48, ease: "easeOut" }}
         >
@@ -717,27 +731,27 @@ function PricingScreen({ onStart }: { onStart: () => void }) {
           <h2 className="mt-4 text-[clamp(2.4rem,6vw,5.25rem)] font-bold leading-none tracking-normal text-white">
             定价
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base sm:leading-7">
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base sm:leading-7">
             免费计划覆盖基础发布；付费套餐提供更高站点、存储和部署额度。
           </p>
         </motion.div>
 
         <motion.div
           animate={{ opacity: 1, y: 0 }}
-          className="grid gap-3 sm:grid-cols-2 md:gap-4"
+          className="mx-auto grid w-full max-w-5xl gap-3 sm:grid-cols-2 md:gap-4"
           initial={{ opacity: 0, y: 26 }}
           transition={{ delay: 0.12, duration: 0.5, ease: "easeOut" }}
         >
           {pricingPlans.map((plan) => (
             <motion.article
               className={cn(
-                "glass-surface flex min-h-[19rem] flex-col rounded-lg p-5 outline-none transition-colors duration-300 md:p-6",
+                "glass-surface flex min-h-[19rem] flex-col items-center rounded-lg p-5 text-center outline-none transition-colors duration-300 md:p-6",
                 plan.highlighted ? "is-active border-cyan-200/30 bg-cyan-300/[0.08]" : null
               )}
               key={plan.name}
               whileHover={{ y: -6 }}
             >
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex w-full flex-col items-center gap-3">
                 <div className="min-w-0">
                   <h3 className="text-xl font-semibold tracking-normal text-white md:text-2xl">{plan.name}</h3>
                   <p className="mt-2 text-sm leading-6 text-zinc-400">{plan.description}</p>
@@ -749,14 +763,14 @@ function PricingScreen({ onStart }: { onStart: () => void }) {
                 ) : null}
               </div>
 
-              <div className="mt-5 flex items-end gap-2">
+              <div className="mt-5 flex items-end justify-center gap-2">
                 <span className="text-4xl font-bold leading-none tracking-normal text-white">{plan.price}</span>
                 <span className="pb-1 text-sm font-medium text-zinc-500">{plan.period}</span>
               </div>
 
               <ul className="mt-5 space-y-2 text-sm leading-6 text-zinc-300">
                 {plan.features.map((feature) => (
-                  <li className="flex items-start gap-2" key={feature}>
+                  <li className="flex items-start justify-center gap-2" key={feature}>
                     <Check aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-cyan-200" strokeWidth={2.1} />
                     <span>{feature}</span>
                   </li>
@@ -1107,86 +1121,228 @@ function DashboardScreen({
   onNavigate: (path: string) => void;
   session: Session | null;
 }) {
+  type CreateSiteStage = "idle" | "checking_domain" | "checking_project" | "creating_site" | "uploading" | "complete" | "blocked";
+
   const [siteName, setSiteName] = useState("");
   const [subdomain, setSubdomain] = useState("");
   const [availability, setAvailability] = useState<SubdomainCheck | null>(null);
   const [createdSite, setCreatedSite] = useState<SiteDraft | null>(null);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [projectFiles, setProjectFiles] = useState<SelectedUploadFile[]>([]);
   const [deploymentScan, setDeploymentScan] = useState<DeploymentScanResult | null>(null);
   const [deploymentSourceRoot, setDeploymentSourceRoot] = useState<string | null>(null);
   const [publishResult, setPublishResult] = useState<UploadArchiveResult | null>(null);
-  const [checking, setChecking] = useState(false);
+  const [createStage, setCreateStage] = useState<CreateSiteStage>("idle");
   const [creating, setCreating] = useState(false);
-  const [scanningArchive, setScanningArchive] = useState(false);
-  const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const emailConfirmed = account?.emailConfirmed ?? isSessionEmailConfirmed(session);
   const scanHasBlockingIssues = hasBlockingScanIssues(deploymentScan);
+  const subdomainValidation = useMemo(() => {
+    return subdomain.trim() ? validateSubdomain(subdomain) : null;
+  }, [subdomain]);
+  const localDomainProblem = subdomainValidation && !subdomainValidation.ok ? subdomainValidation.reason : null;
+  const localDomainReviewHint =
+    subdomainValidation?.ok && subdomainValidation.requiresReview ? "命中敏感词，提交后可能进入人工审核。" : null;
 
-  const roleLabel = account?.role === "admin" ? "管理员" : "用户";
+  const planName = account?.plan ?? "free";
+  const planConfig = getPlanConfig(planName);
+  const planDisplayName = getPlanDisplayName(planName);
+  const siteSizeLimit = planConfig.quotas.site.maxSiteBytes;
+  const fileLimit = planConfig.quotas.deployment.maxFiles;
+  const sizeUsagePercent = deploymentScan ? (deploymentScan.totalBytes / siteSizeLimit) * 100 : 0;
+  const fileUsagePercent = deploymentScan ? (deploymentScan.fileCount / fileLimit) * 100 : 0;
+  const isBusy = creating;
+  const currentStageIndex: Record<CreateSiteStage, number> = {
+    idle: -1,
+    checking_domain: 0,
+    checking_project: 1,
+    creating_site: 2,
+    uploading: 2,
+    complete: 3,
+    blocked: 1
+  };
+  const stageIndex = currentStageIndex[createStage];
+  const quotaMeters = [
+    {
+      exceeded: deploymentScan ? deploymentScan.totalBytes > siteSizeLimit : false,
+      label: "站点大小",
+      percent: sizeUsagePercent,
+      text: deploymentScan ? `${formatBytes(deploymentScan.totalBytes)} / ${formatBytes(siteSizeLimit)}` : `0 B / ${formatBytes(siteSizeLimit)}`
+    },
+    {
+      exceeded: deploymentScan ? deploymentScan.fileCount > fileLimit : false,
+      label: "文件数量",
+      percent: fileUsagePercent,
+      text: deploymentScan ? `${deploymentScan.fileCount} / ${fileLimit}` : `0 / ${fileLimit}`
+    }
+  ];
+  const progressSteps = [
+    {
+      detail: availability
+        ? availability.available
+          ? `${availability.normalized} 可用`
+          : availability.reason ?? "域名不可用"
+        : localDomainProblem ?? localDomainReviewHint ?? "提交后先确认域名是否可用",
+      icon: Globe2,
+      state:
+        availability?.available === false || localDomainProblem
+          ? "failed"
+          : stageIndex > 0 || createStage === "complete"
+            ? "done"
+            : createStage === "checking_domain"
+              ? "active"
+              : "idle",
+      title: "检查域名"
+    },
+    {
+      detail: deploymentScan
+        ? `${deploymentScan.fileCount} 个文件，${formatBytes(deploymentScan.totalBytes)}`
+        : "域名通过后解析 ZIP 并计算项目体积",
+      icon: ScanSearch,
+      state:
+        createStage === "blocked"
+          ? "failed"
+          : stageIndex > 1 || createStage === "complete"
+            ? "done"
+            : createStage === "checking_project"
+              ? "active"
+              : "idle",
+      title: "检查项目"
+    },
+    {
+      detail: publishResult
+        ? getStatusLabel(publishResult.status)
+        : createdSite
+          ? createdSite.publicUrl
+          : "检查通过后创建站点并上传文件",
+      icon: UploadCloud,
+      state: createStage === "complete" ? "done" : createStage === "creating_site" || createStage === "uploading" ? "active" : "idle",
+      title: "创建发布"
+    }
+  ];
 
-  async function handleCheckSubdomain() {
-    setMessage(null);
-    setError(null);
+  function resetOutput() {
     setAvailability(null);
-
-    if (!subdomain.trim()) {
-      setError("请输入子域名。");
-      return;
-    }
-
-    setChecking(true);
-    try {
-      const result = await checkSubdomain(subdomain.trim());
-      setAvailability(result);
-      setMessage(result.available ? "子域名可用。" : result.reason ?? "子域名不可用。");
-    } catch (checkError) {
-      const text = checkError instanceof Error ? checkError.message : "检查失败";
-      setError(text);
-    } finally {
-      setChecking(false);
-    }
+    setCreatedSite(null);
+    setDeploymentScan(null);
+    setDeploymentSourceRoot(null);
+    setPublishResult(null);
+    setCreateStage("idle");
   }
 
   async function handleCreateSite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
     setError(null);
-    setCreatedSite(null);
-    setArchiveFile(null);
-    setDeploymentScan(null);
-    setDeploymentSourceRoot(null);
-    setPublishResult(null);
+    resetOutput();
 
-    if (!emailConfirmed) {
-      setError("请先验证邮箱。注册验证邮件有效期为 24 小时，创建站点时不会重复发送。");
+    if (!subdomain.trim()) {
+      setError("请输入子域名。");
+      return;
+    }
+
+    const validation = validateSubdomain(subdomain);
+    if (!validation.ok) {
+      const reason = validation.reason ?? "子域名格式不符合要求。";
+      setAvailability({
+        available: false,
+        normalized: validation.normalized,
+        reason
+      });
+      setError(reason);
+      return;
+    }
+
+    if (projectFiles.length === 0) {
+      setError("请上传包含 index.html 的文件夹、文件或 ZIP。");
       return;
     }
 
     setCreating(true);
     try {
+      setCreateStage("checking_domain");
+      const domainResult = await checkSubdomain(validation.normalized);
+      setAvailability(domainResult);
+
+      if (!domainResult.available) {
+        setCreateStage("idle");
+        setError(domainResult.reason ?? "域名不可用，请换一个再试。");
+        return;
+      }
+
+      setCreateStage("checking_project");
+      setMessage("域名可用，正在检查项目文件。");
+      const prepared = await prepareProjectDeployment(projectFiles, planName);
+      setDeploymentScan(prepared.scan);
+      setDeploymentSourceRoot(prepared.sourceRoot);
+
+      if (hasBlockingScanIssues(prepared.scan)) {
+        setCreateStage("blocked");
+        setError("项目检查未通过：存在超过额度或阻断发布的问题。");
+        return;
+      }
+
+      setCreateStage("creating_site");
       const site = await createSite({
         name: siteName.trim() || "未命名站点",
-        subdomain: subdomain.trim()
+        subdomain: domainResult.normalized
       });
       setCreatedSite(site);
-      setMessage("站点已创建，可以继续上传静态页面包。");
+
+      setCreateStage("uploading");
+      const uploadSession = await createUploadSession({
+        siteId: site.id,
+        scan: prepared.scan
+      });
+
+      if (uploadSession.status === "blocked") {
+        setCreateStage("blocked");
+        setError("服务端检查阻止了这个项目，请修正后重新上传。");
+        return;
+      }
+
+      const result =
+        prepared.kind === "archive"
+          ? await uploadArchive({
+              uploadSessionId: uploadSession.uploadSessionId,
+              deploymentId: uploadSession.deploymentId,
+              archive: prepared.archive
+            })
+          : await uploadFiles({
+              uploadSessionId: uploadSession.uploadSessionId,
+              deploymentId: uploadSession.deploymentId,
+              files: prepared.files.map((file: PreparedUploadFile) => ({
+                file: file.file,
+                path: file.path
+              }))
+            });
+
+      setPublishResult(result);
+      setCreatedSite({
+        ...site,
+        publicUrl: result.publicUrl,
+        status: result.status === "blocked" ? "pending_review" : result.status
+      });
+      setCreateStage("complete");
+      setMessage(result.status === "active" ? "站点已创建并发布。" : "站点已创建，正在等待审核。");
     } catch (createError) {
       const text = createError instanceof Error ? createError.message : "创建失败";
+      setCreateStage("idle");
       setError(text);
     } finally {
       setCreating(false);
     }
   }
 
-  async function handleSelectedArchive(file: File | null, resetInput?: () => void) {
+  function handleSelectedArchive(file: File | null, resetInput?: () => void) {
     setMessage(null);
     setError(null);
     setArchiveFile(null);
     setDeploymentScan(null);
     setDeploymentSourceRoot(null);
     setPublishResult(null);
+    setCreatedSite(null);
+    setCreateStage("idle");
 
     if (!file) return;
 
@@ -1196,79 +1352,28 @@ function DashboardScreen({
       return;
     }
 
-    setScanningArchive(true);
+    setArchiveFile(file);
+  }
 
-    try {
-      const prepared = await prepareZipDeployment(file, account?.plan ?? "free");
-      setArchiveFile(file);
-      setDeploymentScan(prepared.scan);
-      setDeploymentSourceRoot(prepared.sourceRoot);
-      setMessage("站点包已扫描，可以确认发布。");
-    } catch (scanError) {
-      const text = scanError instanceof Error ? scanError.message : "ZIP 扫描失败";
-      setError(text);
-      resetInput?.();
-    } finally {
-      setScanningArchive(false);
-    }
+  function getUploadPath(file: File) {
+    return file.webkitRelativePath || file.name;
   }
 
   function handleFileUpload(files: File[]) {
-    void handleSelectedArchive(files[0] ?? null);
-  }
-
-  async function handlePublishArchive() {
     setMessage(null);
     setError(null);
+    setArchiveFile(files.length === 1 && isAcceptedArchive(files[0]) ? files[0] : null);
+    setDeploymentScan(null);
+    setDeploymentSourceRoot(null);
     setPublishResult(null);
-
-    if (!createdSite) {
-      setError("请先创建站点。");
-      return;
-    }
-
-    if (!archiveFile || !deploymentScan) {
-      setError("请先选择并扫描 ZIP 站点包。");
-      return;
-    }
-
-    if (scanHasBlockingIssues) {
-      setError("扫描发现阻断问题，请修正后重新上传。");
-      return;
-    }
-
-    setPublishing(true);
-
-    try {
-      const sessionResult = await createUploadSession({
-        siteId: createdSite.id,
-        scan: deploymentScan
-      });
-
-      if (sessionResult.status === "blocked") {
-        setError("服务端扫描阻止了这个站点包，请修正后重新上传。");
-        return;
-      }
-
-      const result = await uploadArchive({
-        uploadSessionId: sessionResult.uploadSessionId,
-        deploymentId: sessionResult.deploymentId,
-        archive: archiveFile
-      });
-
-      setPublishResult(result);
-      setCreatedSite({
-        ...createdSite,
-        publicUrl: result.publicUrl,
-        status: result.status === "blocked" ? "pending_review" : result.status
-      });
-      setMessage(result.status === "active" ? "站点已发布。" : "站点已提交审核。");
-    } catch (publishError) {
-      const text = publishError instanceof Error ? publishError.message : "发布失败";
-      setError(text);
-    } finally {
-      setPublishing(false);
-    }
+    setCreatedSite(null);
+    setCreateStage("idle");
+    setProjectFiles(
+      files.map((file) => ({
+        file,
+        path: getUploadPath(file)
+      }))
+    );
   }
 
   if (!authReady) {
@@ -1281,7 +1386,7 @@ function DashboardScreen({
         <section className={cn(CONTENT_TRACK_CLASS, "flex min-h-dvh items-center pt-20")}>
           <div className="max-w-xl">
             <h1 className="text-4xl font-bold tracking-normal text-white">登录后继续</h1>
-            <p className="mt-4 text-base leading-7 text-zinc-300">创建站点需要登录账号，邮箱验证会在创建时强制检查。</p>
+            <p className="mt-4 text-base leading-7 text-zinc-300">登录账号后可以创建和管理站点。</p>
             <HoverBorderGradient
               alwaysOn
               as="button"
@@ -1301,102 +1406,117 @@ function DashboardScreen({
   return (
     <AuroraHero className="min-h-dvh">
       <section className={cn(CONTENT_TRACK_CLASS, "min-h-dvh pb-10 pt-24")}>
-        <div className="grid gap-5 lg:grid-cols-[22rem_1fr]">
-          <aside className="glass-surface h-fit rounded-lg p-5">
-            <div className="flex items-start gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/10 text-white">
-                {account?.role === "admin" ? <Crown className="h-5 w-5" /> : <UserRound className="h-5 w-5" />}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-white">{account?.email ?? session.user.email}</p>
-                <p className="mt-1 text-xs font-medium text-zinc-500">{roleLabel} · {account?.plan ?? "free"}</p>
-              </div>
-            </div>
-
-            <div
-              className={cn(
-                "mt-5 flex items-start gap-3 rounded-lg border px-3 py-3 text-sm leading-6",
-                emailConfirmed
-                  ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
-                  : "border-amber-300/20 bg-amber-400/10 text-amber-100"
-              )}
-            >
-              {emailConfirmed ? <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <Lock className="mt-0.5 h-4 w-4 shrink-0" />}
-              <span>{emailConfirmed ? "邮箱已验证，可以创建站点。" : "邮箱未验证。验证邮件有效期 24 小时，创建站点前必须验证。"}</span>
-            </div>
-
-            {account?.role === "admin" ? (
-              <button
-                className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
-                onClick={() => onNavigate("/admin")}
-                type="button"
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                管理员面板
-              </button>
-            ) : null}
-          </aside>
-
+        <div className="mx-auto grid max-w-6xl gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div className="glass-surface rounded-lg p-5 sm:p-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h1 className="text-2xl font-semibold tracking-normal text-white">创建站点</h1>
-                <p className="mt-1 text-sm leading-6 text-zinc-400">选择子域名并创建草稿站点。</p>
+                <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-sm font-medium text-cyan-100">
+                  <Plus className="h-4 w-4" />
+                  三步创建
+                </p>
+                <h1 className="mt-4 text-2xl font-semibold tracking-normal text-white">创建站点</h1>
+                <p className="mt-1 text-sm leading-6 text-zinc-400">填写项目名、选择域名并上传 ZIP，提交后自动完成检查和发布。</p>
               </div>
-              <span className="inline-flex h-9 w-fit items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 text-sm font-medium text-zinc-300">
-                <ShieldCheck className="h-4 w-4 text-cyan-200" />
-                Supabase Auth
-              </span>
+              {account?.role === "admin" ? (
+                <button
+                  className="inline-flex h-10 w-fit items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+                  onClick={() => onNavigate("/admin")}
+                  type="button"
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  管理员面板
+                </button>
+              ) : null}
             </div>
 
-            <form className="mt-6 grid gap-4" onSubmit={handleCreateSite}>
-              <label className="grid gap-2 text-sm font-medium text-zinc-200">
-                站点名称
-                <input
-                  className="h-11 rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
-                  onChange={(event) => setSiteName(event.target.value)}
-                  placeholder="我的页面"
-                  value={siteName}
-                />
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-zinc-200">
-                子域名
-                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <form className="mt-6 grid gap-5" onSubmit={handleCreateSite}>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <label className="grid gap-2 text-sm font-medium text-zinc-200">
+                  站点名称
                   <input
-                    className="h-11 rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
+                    className="h-11 rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300 disabled:opacity-60"
+                    disabled={isBusy}
                     onChange={(event) => {
-                      setSubdomain(event.target.value);
-                      setAvailability(null);
+                      setSiteName(event.target.value);
+                      setCreatedSite(null);
+                      setPublishResult(null);
                     }}
-                    placeholder="my-page"
-                    required
-                    value={subdomain}
+                    placeholder="例如：春季活动页"
+                    value={siteName}
                   />
-                  <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
-                    disabled={checking}
-                    onClick={handleCheckSubdomain}
-                    type="button"
-                  >
-                    {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
-                    检查
-                  </button>
-                </div>
-              </label>
+                </label>
 
-              {availability ? (
-                <p
-                  className={cn(
-                    "rounded-lg border px-3 py-3 text-sm leading-6",
-                    availability.available
-                      ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
-                      : "border-rose-300/20 bg-rose-400/10 text-rose-100"
-                  )}
-                >
-                  {availability.available ? `${availability.normalized} 可用。` : availability.reason ?? "子域名不可用。"}
-                </p>
-              ) : null}
+                <label className="grid gap-2 text-sm font-medium text-zinc-200">
+                  域名
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-white/10 bg-black/40 focus-within:border-cyan-300">
+                    <input
+                      className="h-11 min-w-0 bg-transparent px-3 text-sm text-white outline-none placeholder:text-zinc-600 disabled:opacity-60"
+                      disabled={isBusy}
+                      onChange={(event) => {
+                        setSubdomain(event.target.value);
+                        resetOutput();
+                      }}
+                      placeholder="my-page"
+                      required
+                      value={subdomain}
+                    />
+                    <span className="inline-flex h-11 items-center border-l border-white/10 px-3 text-sm font-medium text-zinc-400">
+                      .985201314.xyz
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="grid gap-2 text-sm font-medium text-zinc-200">
+                上传项目
+                <FileUpload allowDirectories disabled={isBusy} files={projectFiles.map((item) => item.file)} multiple onChange={handleFileUpload} />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {progressSteps.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div
+                      className={cn(
+                        "rounded-lg border px-3 py-3",
+                        item.state === "done"
+                          ? "border-emerald-300/20 bg-emerald-400/10"
+                          : item.state === "failed"
+                            ? "border-rose-300/20 bg-rose-400/10"
+                            : item.state === "active"
+                              ? "border-cyan-300/25 bg-cyan-400/10"
+                              : "border-white/10 bg-white/[0.03]"
+                      )}
+                      key={item.title}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border",
+                            item.state === "done"
+                              ? "border-emerald-300/20 text-emerald-100"
+                              : item.state === "failed"
+                                ? "border-rose-300/20 text-rose-100"
+                                : item.state === "active"
+                                  ? "border-cyan-300/25 text-cyan-100"
+                                  : "border-white/10 text-zinc-400"
+                          )}
+                        >
+                          {item.state === "active" ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : item.state === "done" ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <Icon className="h-4 w-4" />
+                          )}
+                        </span>
+                        <p className="text-sm font-semibold text-white">{item.title}</p>
+                      </div>
+                      <p className="mt-3 min-h-10 text-sm leading-5 text-zinc-400">{item.detail}</p>
+                    </div>
+                  );
+                })}
+              </div>
 
               {message ? (
                 <p className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm leading-6 text-emerald-100">
@@ -1414,107 +1534,120 @@ function DashboardScreen({
                 as="button"
                 className="h-11 w-full bg-white text-black hover:bg-zinc-100 sm:w-fit"
                 containerClassName="w-full rounded-full sm:w-fit"
-                disabled={creating || !emailConfirmed}
+                disabled={isBusy || projectFiles.length === 0}
                 type="submit"
               >
-                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                创建站点
+                {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                {isBusy ? "正在创建" : "创建站点"}
               </HoverBorderGradient>
             </form>
 
-            {createdSite ? (
+            {createdSite || deploymentScan ? (
               <div className="mt-6 space-y-4">
-                <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4">
-                  <p className="text-sm font-semibold text-cyan-100">{createdSite.name}</p>
-                  <a className="mt-2 block break-all text-sm text-cyan-200 hover:text-white" href={createdSite.publicUrl}>
-                    {createdSite.publicUrl}
-                  </a>
-                  <p className="mt-2 text-xs font-medium uppercase tracking-normal text-zinc-500">{getStatusLabel(createdSite.status)}</p>
-                </div>
-
-                <div className="rounded-lg border border-white/10 bg-black/30 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h2 className="text-lg font-semibold tracking-normal text-white">上传静态页面包</h2>
-                      <p className="mt-1 text-sm leading-6 text-zinc-400">选择包含入口 HTML 的 ZIP，扫描通过后发布到当前站点。</p>
-                    </div>
-                    <span className="inline-flex h-9 w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-zinc-300">
-                      <UploadCloud className="h-4 w-4 text-cyan-200" />
-                      ZIP
-                    </span>
-                  </div>
-
-                  <div className="mt-5">
-                    <FileUpload disabled={publishing} files={archiveFile ? [archiveFile] : []} onChange={handleFileUpload} />
-                  </div>
-
-                  {scanningArchive ? (
-                    <p className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-300">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      正在扫描 ZIP
-                    </p>
-                  ) : null}
-
-                  {deploymentScan ? (
-                    <div className="mt-4 space-y-3">
-                      <div className="grid gap-2 sm:grid-cols-4">
-                        {[
-                          ["文件", deploymentScan.fileCount],
-                          ["大小", formatBytes(deploymentScan.totalBytes)],
-                          ["入口", deploymentScan.entrypoint ?? "未找到"],
-                          ["风险", getRiskLabel(deploymentScan.riskLevel)]
-                        ].map(([label, value]) => (
-                          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3" key={label}>
-                            <p className="text-xs font-medium text-zinc-500">{label}</p>
-                            <p className="mt-1 truncate text-sm font-semibold text-zinc-100">{value}</p>
-                          </div>
-                        ))}
+                {createdSite ? (
+                  <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-cyan-100">{createdSite.name}</p>
+                        <a className="mt-2 block break-all text-sm text-cyan-200 hover:text-white" href={createdSite.publicUrl}>
+                          {createdSite.publicUrl}
+                        </a>
                       </div>
+                      <span className="inline-flex h-8 w-fit items-center rounded-full border border-white/10 bg-black/30 px-3 text-xs font-semibold text-zinc-200">
+                        {getStatusLabel(createdSite.status)}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
 
-                      {deploymentSourceRoot ? (
-                        <p className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-3 text-sm leading-6 text-cyan-100">
-                          已自动使用 {deploymentSourceRoot}/ 作为发布目录。
-                        </p>
-                      ) : null}
-
-                      {deploymentScan.issues.length > 0 ? (
-                        <div className="space-y-2">
-                          {deploymentScan.issues.slice(0, 5).map((issue) => (
-                            <p className={cn("rounded-lg border px-3 py-2 text-sm leading-6", getIssueClass(issue))} key={`${issue.code}-${issue.path ?? issue.message}`}>
-                              {issue.path ? `${issue.path}：` : ""}
-                              {issue.message}
-                            </p>
-                          ))}
-                          {deploymentScan.issues.length > 5 ? (
-                            <p className="text-sm text-zinc-500">还有 {deploymentScan.issues.length - 5} 条诊断未显示。</p>
-                          ) : null}
+                {deploymentScan ? (
+                  <div className="space-y-3">
+                    <div className="grid gap-2 sm:grid-cols-4">
+                      {[
+                        ["文件", deploymentScan.fileCount],
+                        ["大小", formatBytes(deploymentScan.totalBytes)],
+                        ["入口", deploymentScan.entrypoint ?? "未找到"],
+                        ["风险", getRiskLabel(deploymentScan.riskLevel)]
+                      ].map(([label, value]) => (
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3" key={label}>
+                          <p className="text-xs font-medium text-zinc-500">{label}</p>
+                          <p className="mt-1 truncate text-sm font-semibold text-zinc-100">{value}</p>
                         </div>
-                      ) : null}
-
-                      <button
-                        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-100 disabled:opacity-50 sm:w-fit"
-                        disabled={publishing || scanningArchive || scanHasBlockingIssues}
-                        onClick={handlePublishArchive}
-                        type="button"
-                      >
-                        {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                        发布站点包
-                      </button>
+                      ))}
                     </div>
-                  ) : null}
 
-                  {publishResult ? (
-                    <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4 text-sm leading-6 text-emerald-100">
-                      <p className="font-semibold">{getStatusLabel(publishResult.status)}</p>
-                      <a className="mt-1 block break-all text-emerald-200 hover:text-white" href={publishResult.publicUrl}>
-                        {publishResult.publicUrl}
-                      </a>
-                    </div>
-                  ) : null}
-                </div>
+                    {deploymentSourceRoot ? (
+                      <p className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-3 text-sm leading-6 text-cyan-100">
+                        已自动使用 {deploymentSourceRoot}/ 作为发布目录。
+                      </p>
+                    ) : null}
+
+                    {deploymentScan.issues.length > 0 ? (
+                      <div className="space-y-2">
+                        {deploymentScan.issues.slice(0, 5).map((issue) => (
+                          <p
+                            className={cn("rounded-lg border px-3 py-2 text-sm leading-6", getIssueClass(issue))}
+                            key={`${issue.code}-${issue.path ?? issue.message}`}
+                          >
+                            {issue.path ? `${issue.path}：` : ""}
+                            {issue.message}
+                          </p>
+                        ))}
+                        {deploymentScan.issues.length > 5 ? (
+                          <p className="text-sm text-zinc-500">还有 {deploymentScan.issues.length - 5} 条诊断未显示。</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
+
+          <aside className="glass-surface h-fit rounded-lg p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-zinc-500">当前计划</p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-normal text-white">{planDisplayName}</h2>
+              </div>
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
+                <Crown className="h-5 w-5" />
+              </span>
+            </div>
+
+            <div className="mt-6 space-y-5">
+              {quotaMeters.map((meter) => (
+                <div key={meter.label}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-zinc-300">{meter.label}</p>
+                    <p className={cn("text-xs font-semibold", meter.exceeded ? "text-rose-200" : "text-zinc-500")}>{meter.text}</p>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className={cn("h-full rounded-full", meter.exceeded ? "bg-rose-400" : "bg-cyan-300")}
+                      style={{ width: `${clampPercent(meter.percent)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 grid gap-2 text-sm leading-6 text-zinc-400">
+              <p>单站上限：{formatBytes(siteSizeLimit)}</p>
+              <p>文件上限：{fileLimit} 个</p>
+              <p>单文件上限：{formatBytes(planConfig.quotas.deployment.maxFileBytes)}</p>
+            </div>
+
+            {scanHasBlockingIssues ? (
+              <p className="mt-5 rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-3 text-sm leading-6 text-rose-100">
+                当前项目未通过额度或安全检查。
+              </p>
+            ) : deploymentScan ? (
+              <p className="mt-5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm leading-6 text-emerald-100">
+                当前项目在计划额度内。
+              </p>
+            ) : null}
+          </aside>
         </div>
       </section>
     </AuroraHero>

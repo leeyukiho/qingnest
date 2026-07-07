@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 type Particle = {
@@ -103,11 +103,7 @@ export function VanishingText({
   const nearCompletedRef = useRef(false);
   const particlesRef = useRef<Particle[]>([]);
   const completedRef = useRef(false);
-  const [animating, setAnimating] = useState(false);
-
   const complete = useCallback(() => {
-    setAnimating(false);
-
     if (!completedRef.current) {
       completedRef.current = true;
       onComplete?.();
@@ -121,7 +117,7 @@ export function VanishingText({
     onNearComplete?.();
   }, [onNearComplete]);
 
-  const draw = useCallback(() => {
+  const draw = useCallback((captureParticles = false) => {
     const canvas = canvasRef.current;
     const content = contentRef.current;
 
@@ -194,6 +190,11 @@ export function VanishingText({
     }
 
     context.globalAlpha = 1;
+
+    if (!captureParticles) {
+      particlesRef.current = [];
+      return 0;
+    }
 
     const imageData = context.getImageData(0, 0, width, height).data;
     const particles: Particle[] = [];
@@ -275,12 +276,11 @@ export function VanishingText({
     [complete, nearComplete, nearCompleteRatio]
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!vanishing) {
       completedRef.current = false;
       initialPositionRef.current = 0;
       nearCompletedRef.current = false;
-      setAnimating(false);
       particlesRef.current = [];
 
       if (frameRef.current !== null) {
@@ -288,28 +288,31 @@ export function VanishingText({
         frameRef.current = null;
       }
 
+      draw();
       return;
     }
 
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (canvas && context) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+      }
       nearComplete();
       complete();
       return;
     }
 
-    setAnimating(true);
-    frameRef.current = window.requestAnimationFrame(() => {
-      const startPosition = draw();
+    const startPosition = draw(true);
 
-      if (startPosition <= 0) {
-        nearComplete();
-        complete();
-        return;
-      }
+    if (startPosition <= 0) {
+      nearComplete();
+      complete();
+      return;
+    }
 
-      initialPositionRef.current = startPosition;
-      animate(startPosition);
-    });
+    initialPositionRef.current = startPosition;
+    animate(startPosition);
 
     return () => {
       if (frameRef.current !== null) {
@@ -319,21 +322,56 @@ export function VanishingText({
     };
   }, [animate, complete, draw, nearComplete, vanishing]);
 
+  useEffect(() => {
+    if (vanishing) return;
+
+    const content = contentRef.current;
+    if (!content) return;
+
+    let active = true;
+    let redrawFrame: number | null = null;
+
+    const scheduleRedraw = () => {
+      if (redrawFrame !== null) {
+        window.cancelAnimationFrame(redrawFrame);
+      }
+
+      redrawFrame = window.requestAnimationFrame(() => {
+        redrawFrame = null;
+        if (active) draw();
+      });
+    };
+
+    const observer = new ResizeObserver(scheduleRedraw);
+    observer.observe(content);
+
+    window.addEventListener("resize", scheduleRedraw);
+    document.fonts?.ready.then(scheduleRedraw).catch(() => undefined);
+
+    scheduleRedraw();
+
+    return () => {
+      active = false;
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleRedraw);
+
+      if (redrawFrame !== null) {
+        window.cancelAnimationFrame(redrawFrame);
+      }
+    };
+  }, [draw, vanishing]);
+
   return (
     <span className={cn("relative inline-block", className)}>
       <span
-        className={cn("relative z-10 inline-block", (animating || vanishing) && "opacity-0", contentClassName)}
+        className={cn("relative z-10 inline-block opacity-0", contentClassName)}
         ref={contentRef}
       >
         {children ?? text}
       </span>
       <canvas
         aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute left-0 top-0 z-20 opacity-0",
-          animating && "opacity-100",
-          canvasClassName
-        )}
+        className={cn("pointer-events-none absolute left-0 top-0 z-20", canvasClassName)}
         ref={canvasRef}
       />
     </span>

@@ -1,10 +1,12 @@
-import { scanDeploymentFiles } from "@qingnest/shared/deployment/scan";
 import { getPublicSiteUrl, validateSubdomain } from "@qingnest/shared/config/platform";
+import { scanDeploymentFiles } from "@qingnest/shared/deployment/scan";
+import type { DeploymentScanResult } from "@qingnest/shared/deployment/types";
 import { json, problem, readJson } from "./http";
 import { getWorkerPlatformConfig } from "./platform";
 import {
   checkSubdomainAvailability,
   completeArchiveUpload,
+  completeFilesUpload,
   createDraftSite,
   createUploadSession,
   getAccountProfile,
@@ -14,7 +16,6 @@ import {
 } from "./state";
 import { hasServiceSupabase } from "./supabase";
 import type { Env } from "./types";
-import type { DeploymentScanResult } from "@qingnest/shared/deployment/types";
 
 type SiteCreateInput = {
   name?: string;
@@ -34,6 +35,18 @@ type SignUpInput = {
 
 function isUploadedFile(value: unknown): value is File {
   return typeof value === "object" && value !== null && "arrayBuffer" in value && "name" in value;
+}
+
+function getFormFiles(formData: FormData, fieldName: string): File[] {
+  const files: File[] = [];
+
+  for (const value of formData.getAll(fieldName) as unknown[]) {
+    if (isUploadedFile(value)) {
+      files.push(value);
+    }
+  }
+
+  return files;
 }
 
 async function maybeGetUser(
@@ -183,6 +196,40 @@ export async function handleApi(request: Request, env: Env) {
         uploadSessionId,
         deploymentId,
         archive,
+        user
+      });
+      return json(result, { status: 201 });
+    }
+
+    const uploadFilesMatch = url.pathname.match(/^\/api\/upload-sessions\/([^/]+)\/files$/);
+
+    if (request.method === "POST" && uploadFilesMatch) {
+      const uploadSessionId = decodeURIComponent(uploadFilesMatch[1] ?? "");
+      const formData = await request.formData();
+      const deploymentId = formData.get("deploymentId");
+      const files = getFormFiles(formData, "files");
+      const paths = formData.getAll("paths").filter((path): path is string => typeof path === "string");
+
+      if (typeof deploymentId !== "string" || !deploymentId) {
+        return problem("缺少部署 ID");
+      }
+
+      if (files.length === 0) {
+        return problem("缺少项目文件");
+      }
+
+      if (files.length !== paths.length) {
+        return problem("项目文件路径不完整");
+      }
+
+      const user = await maybeGetUser(request, env);
+      const result = await completeFilesUpload(env, {
+        uploadSessionId,
+        deploymentId,
+        files: files.map((file, index) => ({
+          file,
+          path: paths[index] ?? file.name
+        })),
         user
       });
       return json(result, { status: 201 });

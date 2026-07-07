@@ -172,4 +172,23 @@ export async function uploadArchive(input: {
   );
 }
 
+export async function uploadFiles(input: {
+  uploadSessionId: string;
+  deploymentId: string;
+  files: Array<{ file: File; path: string }>;
+}) {
+  const formData = new FormData();
+  formData.append("deploymentId", input.deploymentId);
+
+  for (const item of input.files) {
+    formData.append("files", item.file, item.path);
+    formData.append("paths", item.path);
+  }
+
+  return formRequest<UploadArchiveResult>(
+    `/api/upload-sessions/${encodeURIComponent(input.uploadSessionId)}/files`,
+    formData
+  );
+}
+
 

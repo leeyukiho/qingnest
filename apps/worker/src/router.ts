@@ -41,8 +41,14 @@ export async function handleSiteRequest(request: Request, env: Env) {
     return withSecurityHeaders(problem("站点正在审核中", 403));
   }
 
+  const siteAssets = env.SITE_ASSETS;
+
+  if (!siteAssets) {
+    return withSecurityHeaders(problem("SITE_ASSETS R2 binding is not configured", 503));
+  }
+
   for (const path of candidatePaths(url.pathname)) {
-    const object = await env.SITE_ASSETS.get(`${mapping.r2Prefix}/${path}`);
+    const object = await siteAssets.get(`${mapping.r2Prefix}/${path}`);
 
     if (object) {
       const headers = new Headers();
@@ -59,7 +65,7 @@ export async function handleSiteRequest(request: Request, env: Env) {
   }
 
   if (mapping.spaFallbackEnabled) {
-    const object = await env.SITE_ASSETS.get(`${mapping.r2Prefix}/index.html`);
+    const object = await siteAssets.get(`${mapping.r2Prefix}/index.html`);
 
     if (object) {
       const headers = new Headers();

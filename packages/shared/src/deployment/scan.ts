@@ -95,6 +95,34 @@ function findSuggestedOutputDirectory(paths: string[]) {
   return null;
 }
 
+function findSingleTopLevelDirectory(paths: string[]) {
+  const roots = new Set<string>();
+
+  for (const path of paths) {
+    const [root, ...rest] = path.split("/");
+
+    if (!root || rest.length === 0) {
+      return null;
+    }
+
+    roots.add(root);
+  }
+
+  return roots.size === 1 ? [...roots][0] : null;
+}
+
+function stripRootDirectory<T extends ScanInputFile>(files: T[], root: string) {
+  const prefix = `${root}/`;
+
+  return files
+    .filter((file) => file.path.startsWith(prefix))
+    .map((file) => ({
+      ...file,
+      path: file.path.slice(prefix.length)
+    }))
+    .filter((file) => file.path.length > 0);
+}
+
 export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "free"): DeploymentScanResult {
   const plan = getPlanConfig(planName);
   const issues: DeploymentScanIssue[] = [];
@@ -229,29 +257,48 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
 
 export function prepareDeploymentFiles<T extends ScanInputFile>(inputFiles: T[], planName = "free") {
   const normalizedFiles = normalizeFiles(inputFiles);
-  const rootScan = scanDeploymentFiles(normalizedFiles, planName);
+  let files = normalizedFiles;
+  const sourceRoots: string[] = [];
 
-  if (rootScan.entrypoint || !rootScan.suggestedOutputDirectory) {
-    return {
-      files: normalizedFiles,
-      sourceRoot: null,
-      scan: rootScan
-    };
+  for (let depth = 0; depth < 4; depth += 1) {
+    const scan = scanDeploymentFiles(files, planName);
+
+    if (scan.entrypoint) {
+      return {
+        files,
+        sourceRoot: sourceRoots.length > 0 ? sourceRoots.join("/") : null,
+        scan
+      };
+    }
+
+    const paths = files.map((file) => file.path);
+    const nextRoot = scan.suggestedOutputDirectory ?? findSingleTopLevelDirectory(paths);
+
+    if (!nextRoot) {
+      return {
+        files,
+        sourceRoot: sourceRoots.length > 0 ? sourceRoots.join("/") : null,
+        scan
+      };
+    }
+
+    const nextFiles = stripRootDirectory(files, nextRoot);
+
+    if (nextFiles.length === 0 || nextFiles.length === files.length) {
+      return {
+        files,
+        sourceRoot: sourceRoots.length > 0 ? sourceRoots.join("/") : null,
+        scan
+      };
+    }
+
+    sourceRoots.push(nextRoot);
+    files = nextFiles;
   }
-
-  const sourceRoot = rootScan.suggestedOutputDirectory;
-  const prefix = `${sourceRoot}/`;
-  const files = normalizedFiles
-    .filter((file) => file.path.startsWith(prefix))
-    .map((file) => ({
-      ...file,
-      path: file.path.slice(prefix.length)
-    }))
-    .filter((file) => file.path.length > 0);
 
   return {
     files,
-    sourceRoot,
+    sourceRoot: sourceRoots.length > 0 ? sourceRoots.join("/") : null,
     scan: scanDeploymentFiles(files, planName)
   };
 }
