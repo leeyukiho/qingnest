@@ -6,12 +6,14 @@ import {
   BadgeCheck,
   Check,
   Crown,
+  Eye,
+  EyeOff,
   Globe2,
   LayoutDashboard,
   Loader2,
   Lock,
   LogIn,
-  MailCheck,
+  LogOut,
   Plus,
   ScanSearch,
   ShieldCheck,
@@ -29,6 +31,7 @@ import {
   uploadArchive,
   type AccountProfile,
   type AdminOverview,
+  type SignUpConfirmationResult,
   type SiteDraft,
   type SubdomainCheck,
   type UploadArchiveResult
@@ -37,12 +40,14 @@ import type { DeploymentScanIssue, DeploymentScanResult } from "@qingnest/shared
 import { isAcceptedArchive, prepareZipDeployment } from "@/lib/archive";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { EncryptedText } from "@/components/ui/encrypted-text";
+import { FileUpload } from "@/components/ui/file-upload";
 import { FloatingDock, type FloatingDockItem } from "@/components/ui/floating-dock";
 import { AuroraHero } from "@/components/ui/hero-2";
 import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
 import { Navbar, NavbarButton, NavbarLogo, NavBody } from "@/components/ui/resizable-navbar";
 import { SparklesCore } from "@/components/ui/sparkles";
 import { TextHoverEffect } from "@/components/ui/text-hover-effect";
+import { VanishingText } from "@/components/ui/vanishing-text";
 import { cn } from "@/lib/utils";
 
 const pageVariants: Variants = {
@@ -69,9 +74,39 @@ const pageVariants: Variants = {
 };
 
 const CONTENT_TRACK_CLASS = "mx-auto w-[calc(100vw-32px)] max-w-7xl sm:w-[calc(100vw-48px)]";
+const PRIMARY_CTA_BUTTON_CLASS =
+  "border-white/20 !bg-black !text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:!bg-zinc-900";
+const AUTH_TOGGLE_BUTTON_CLASS =
+  "h-10 rounded-md border text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black";
+const AUTH_TOGGLE_ACTIVE_CLASS =
+  "border-white/20 bg-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]";
+const AUTH_TOGGLE_INACTIVE_CLASS = "border-transparent text-zinc-300 hover:bg-white/10 hover:text-white";
 const BRAND_LAYOUT_ID = "qingnest-wordmark";
 const SIGNUP_CONFIRMATION_STORAGE_KEY = "qingnest:signup-confirmation-email";
 const SIGNUP_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
+const LAST_HOME_PAGE_INDEX = 2;
+const HERO_VANISH_FALLBACK_MS = 2800;
+
+const qingNestVanishDrawOptions = {
+  color: (context: CanvasRenderingContext2D, width: number, height: number) => {
+    const gradient = context.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width * 0.46);
+
+    gradient.addColorStop(0, "#f8fdff");
+    gradient.addColorStop(0.32, "#67e8f9");
+    gradient.addColorStop(0.68, "#2563eb");
+    gradient.addColorStop(1, "rgba(14, 165, 233, 0.92)");
+
+    return gradient;
+  },
+  fillOpacity: 0.08,
+  fontFamily: '"Geist Sans", ui-sans-serif, system-ui, sans-serif',
+  fontSize: (width: number, height: number) => Math.min((width / 1200) * 178, (height / 300) * 178),
+  fontWeight: 800,
+  lineHeight: (fontSize: number) => fontSize * 1.12,
+  strokeOpacity: 0.7,
+  strokeWidth: 0.8,
+  textAlign: "center" as const
+};
 
 type AppLocation = {
   pathname: string;
@@ -104,10 +139,31 @@ const steps = [
   },
   {
     accentClass: "border-amber-200/30 bg-amber-400/10 text-amber-100",
-    description: "邮箱验证完成后创建站点，确认发布后生成可访问链接。",
+    description: "选择永久域名并确认发布，生成可以长期分享的访问链接。",
     dockTitle: "发布",
     icon: Globe2,
     title: "生成访问链接"
+  }
+];
+
+const pricingPlans = [
+  {
+    cta: "免费开始",
+    description: "适合个人作品、AI 页面和轻量项目。",
+    features: ["注册赠送永久域名", "最多 3 个站点", "单站点 50 MB", "每日 20 次部署"],
+    highlighted: false,
+    name: "免费计划",
+    period: "永久免费",
+    price: "¥0"
+  },
+  {
+    cta: "升级套餐",
+    description: "适合持续发布、更多项目和更高访问量。",
+    features: ["20 个站点", "2 GB 总存储", "单站点 200 MB", "每日 100 次部署", "访问分析与去品牌"],
+    highlighted: true,
+    name: "付费套餐",
+    period: "/月",
+    price: "¥29"
   }
 ];
 
@@ -127,10 +183,26 @@ function isHomePathname(pathname: string) {
   return pathname === "/" || pathname === "/index.html";
 }
 
+function clampHomePage(page: number) {
+  return Math.max(0, Math.min(LAST_HOME_PAGE_INDEX, page));
+}
+
+function getHomePageFromHash(hash: string) {
+  if (hash === "#pricing") return 2;
+  if (hash === "#steps") return 1;
+  return 0;
+}
+
+function getHomePathForPage(page: number) {
+  if (page === 2) return "/#pricing";
+  if (page === 1) return "/#steps";
+  return "/";
+}
+
 function getInitialPage() {
   if (typeof window === "undefined") return 0;
 
-  return isHomePathname(window.location.pathname) && window.location.hash === "#steps" ? 1 : 0;
+  return isHomePathname(window.location.pathname) ? getHomePageFromHash(window.location.hash) : 0;
 }
 
 function getAuthMode(search: string): AuthMode {
@@ -156,7 +228,7 @@ function getAuthErrorMessage(message: string) {
   }
 
   if (/user already registered/i.test(message)) {
-    return "这个邮箱已经注册，可以直接登录。";
+    return "邮箱已注册，可直接登录。";
   }
 
   return message;
@@ -212,10 +284,6 @@ function writeSignupConfirmationStore(store: SignupConfirmationStore) {
   }
 }
 
-function getSignupConfirmationRecord(email: string) {
-  return readSignupConfirmationStore()[email] ?? null;
-}
-
 function rememberSignupConfirmationEmail(email: string, serverRecord?: { sentAt: string; expiresAt: string }) {
   const now = Date.now();
   const sentAt = serverRecord ? Date.parse(serverRecord.sentAt) : now;
@@ -237,15 +305,6 @@ function clearSignupConfirmationEmail(email: string) {
 
   delete store[email];
   writeSignupConfirmationStore(store);
-}
-
-function formatConfirmationExpiry(expiresAt: number) {
-  return new Date(expiresAt).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
 }
 
 function formatBytes(value: number) {
@@ -277,11 +336,12 @@ function hasBlockingScanIssues(scan: DeploymentScanResult | null) {
   return Boolean(scan?.issues.some((issue) => issue.severity === "error"));
 }
 
-function getSignupConfirmationNotice(record: SignupConfirmationRecord) {
-  return `验证邮件已经发送，请不要重复点击。请在 ${formatConfirmationExpiry(record.expiresAt)} 前完成邮箱验证；验证后可以从邮件直接进入 QingNest，也可以回到这里切换到登录并输入密码。`;
+function getSignupConfirmationNotice() {
+  return "验证邮件已发送，请完成邮箱验证后登录。";
 }
 
 function SiteNavbar({
+  account,
   animateBrand,
   authReady,
   compact,
@@ -289,6 +349,7 @@ function SiteNavbar({
   isAuthenticated,
   onNavigate
 }: {
+  account: AccountProfile | null;
   animateBrand: boolean;
   authReady: boolean;
   compact: boolean;
@@ -311,23 +372,42 @@ function SiteNavbar({
           />
         ) : null}
         <div className="flex items-center gap-4 sm:gap-5">
-          <NavbarButton aria-label="定价" showUnderline={!firstScreen} variant="secondary">
+          <NavbarButton aria-label="定价" onClick={() => onNavigate("/#pricing")} showUnderline={!firstScreen} variant="secondary">
             定价
           </NavbarButton>
           {isAuthenticated ? (
-            <NavbarButton aria-label="工作台" onClick={() => onNavigate("/app")} showUnderline={!firstScreen} variant="secondary">
-              工作台
+            <NavbarButton aria-label="创建站点" onClick={() => onNavigate("/app")} showUnderline={!firstScreen} variant="secondary">
+              创建站点
             </NavbarButton>
           ) : null}
-          <NavbarButton
-            aria-label="登录"
-            disabled={!authReady}
-            onClick={() => onNavigate("/auth")}
-            showUnderline={!firstScreen}
-            variant="secondary"
-          >
-            登录
-          </NavbarButton>
+          {isAuthenticated ? (
+            <button
+              aria-label="个人中心"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.08] text-zinc-100 shadow-[0_10px_28px_rgba(0,0,0,0.28)] transition-colors hover:border-cyan-200/45 hover:bg-white/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+              onClick={() => onNavigate("/profile")}
+              title={account?.email ?? "个人中心"}
+              type="button"
+            >
+              {account?.role === "admin" ? (
+                <Crown aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
+              ) : (
+                <UserRound aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
+              )}
+            </button>
+          ) : (
+            <HoverBorderGradient
+              alwaysOn
+              aria-label="登录"
+              as="button"
+              className={cn("h-10 px-4", PRIMARY_CTA_BUTTON_CLASS)}
+              containerClassName="rounded-full"
+              disabled={!authReady}
+              onClick={() => onNavigate("/auth")}
+              type="button"
+            >
+              登录
+            </HoverBorderGradient>
+          )}
         </div>
       </NavBody>
     </Navbar>
@@ -356,7 +436,15 @@ function BrandSignal() {
   );
 }
 
-function QingNestMark({ layoutId }: { layoutId?: string }) {
+function QingNestMark({
+  layoutId,
+  onVanishComplete,
+  vanishing = false
+}: {
+  layoutId?: string;
+  onVanishComplete?: () => void;
+  vanishing?: boolean;
+}) {
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
@@ -373,7 +461,18 @@ function QingNestMark({ layoutId }: { layoutId?: string }) {
         layoutId={layoutId}
         transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
       >
-        <TextHoverEffect revealRadius={540} text="QingNest" />
+        <VanishingText
+          canvasClassName="h-full w-full"
+          className="block h-full w-full"
+          contentClassName="block h-full w-full"
+          drawOptions={qingNestVanishDrawOptions}
+          onComplete={onVanishComplete}
+          onNearComplete={onVanishComplete}
+          text="QingNest"
+          vanishing={vanishing}
+        >
+          <TextHoverEffect revealRadius={540} text="QingNest" />
+        </VanishingText>
       </motion.div>
       <BrandSignal />
     </motion.div>
@@ -389,6 +488,43 @@ function HeroScreen({
   onNext: () => void;
   onStart: () => void;
 }) {
+  const [isStarting, setIsStarting] = useState(false);
+  const startTimeoutRef = useRef<number | null>(null);
+  const hasStartedRouteRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (startTimeoutRef.current) {
+        window.clearTimeout(startTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const finishStart = useCallback(() => {
+    if (hasStartedRouteRef.current) return;
+
+    hasStartedRouteRef.current = true;
+
+    if (startTimeoutRef.current) {
+      window.clearTimeout(startTimeoutRef.current);
+      startTimeoutRef.current = null;
+    }
+
+    onStart();
+  }, [onStart]);
+
+  const handleVanishTextComplete = useCallback(() => {
+    finishStart();
+  }, [finishStart]);
+
+  function handleStart() {
+    if (isStarting) return;
+
+    hasStartedRouteRef.current = false;
+    setIsStarting(true);
+    startTimeoutRef.current = window.setTimeout(finishStart, HERO_VANISH_FALLBACK_MS);
+  }
+
   return (
     <AuroraHero className="h-dvh min-h-dvh">
       <section
@@ -398,7 +534,7 @@ function HeroScreen({
         )}
         id="home"
       >
-        <QingNestMark layoutId={brandLayoutId} />
+        <QingNestMark layoutId={brandLayoutId} onVanishComplete={handleVanishTextComplete} vanishing={isStarting} />
 
         <motion.div
           animate={{ opacity: 1, y: 0 }}
@@ -416,7 +552,7 @@ function HeroScreen({
             />
           </p>
           <p className="text-[clamp(0.82rem,2.2vw,1rem)] font-medium leading-6 text-cyan-100/75">
-            注册后先验证邮箱，再创建站点和发布内容
+            注册赠送永久域名
           </p>
         </motion.div>
 
@@ -430,9 +566,10 @@ function HeroScreen({
             alwaysOn
             aria-label="登录并开始使用 QingNest"
             as="button"
-            className="h-12 min-w-40 bg-white px-5 text-black hover:bg-zinc-100"
+            className={cn("h-12 min-w-40 px-5", PRIMARY_CTA_BUTTON_CLASS)}
             containerClassName="rounded-full"
-            onClick={onStart}
+            aria-disabled={isStarting}
+            onClick={handleStart}
             type="button"
           >
             <LogIn aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
@@ -442,13 +579,14 @@ function HeroScreen({
 
         <motion.button
           animate={{ opacity: 1, y: 0 }}
-          className="absolute bottom-5 inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-zinc-400 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black sm:bottom-7 md:bottom-8"
+          className="absolute bottom-5 inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-zinc-400 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none sm:bottom-7 md:bottom-8"
+          disabled={isStarting}
           initial={{ opacity: 0, y: 12 }}
           onClick={onNext}
           transition={{ delay: 0.32, duration: 0.42, ease: "easeOut" }}
           type="button"
         >
-          <span>查看发布方法</span>
+          <span>发布方法</span>
           <ArrowDown aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
         </motion.button>
       </section>
@@ -492,7 +630,7 @@ function StepsScreen() {
             上传、检查、发布
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base sm:leading-7">
-            邮箱验证只在创建站点前强制执行，注册表单提交成功后会立即显示完成状态。
+            选择一个永久域名，上传包含入口 HTML 的 ZIP，扫描通过后即可发布。
           </p>
         </motion.div>
 
@@ -556,18 +694,111 @@ function StepsScreen() {
   );
 }
 
+function PricingScreen({ onStart }: { onStart: () => void }) {
+  return (
+    <AuroraHero className="h-dvh min-h-dvh">
+      <section
+        className={cn(
+          CONTENT_TRACK_CLASS,
+          "flex h-dvh max-h-dvh flex-col justify-start gap-4 overflow-y-auto pb-6 pt-24 sm:gap-5 md:justify-center md:gap-7 md:pt-24"
+        )}
+        id="pricing"
+      >
+        <motion.div
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-3xl"
+          initial={{ opacity: 0, y: 22 }}
+          transition={{ duration: 0.48, ease: "easeOut" }}
+        >
+          <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-cyan-100 shadow-[0_0_36px_rgba(34,211,238,0.16)] backdrop-blur">
+            <Crown aria-hidden="true" className="h-4 w-4 text-cyan-200" strokeWidth={1.8} />
+            定价
+          </p>
+          <h2 className="mt-4 text-[clamp(2.4rem,6vw,5.25rem)] font-bold leading-none tracking-normal text-white">
+            定价
+          </h2>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base sm:leading-7">
+            免费计划覆盖基础发布；付费套餐提供更高站点、存储和部署额度。
+          </p>
+        </motion.div>
+
+        <motion.div
+          animate={{ opacity: 1, y: 0 }}
+          className="grid gap-3 sm:grid-cols-2 md:gap-4"
+          initial={{ opacity: 0, y: 26 }}
+          transition={{ delay: 0.12, duration: 0.5, ease: "easeOut" }}
+        >
+          {pricingPlans.map((plan) => (
+            <motion.article
+              className={cn(
+                "glass-surface flex min-h-[19rem] flex-col rounded-lg p-5 outline-none transition-colors duration-300 md:p-6",
+                plan.highlighted ? "is-active border-cyan-200/30 bg-cyan-300/[0.08]" : null
+              )}
+              key={plan.name}
+              whileHover={{ y: -6 }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h3 className="text-xl font-semibold tracking-normal text-white md:text-2xl">{plan.name}</h3>
+                  <p className="mt-2 text-sm leading-6 text-zinc-400">{plan.description}</p>
+                </div>
+                {plan.highlighted ? (
+                  <span className="shrink-0 rounded-full border border-cyan-200/25 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                    推荐
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-5 flex items-end gap-2">
+                <span className="text-4xl font-bold leading-none tracking-normal text-white">{plan.price}</span>
+                <span className="pb-1 text-sm font-medium text-zinc-500">{plan.period}</span>
+              </div>
+
+              <ul className="mt-5 space-y-2 text-sm leading-6 text-zinc-300">
+                {plan.features.map((feature) => (
+                  <li className="flex items-start gap-2" key={feature}>
+                    <Check aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-cyan-200" strokeWidth={2.1} />
+                    <span>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <button
+                className={cn(
+                  "mt-auto inline-flex h-10 w-full items-center justify-center rounded-lg px-4 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+                  plan.highlighted
+                    ? "bg-cyan-200 text-black hover:bg-cyan-100"
+                    : "border border-white/10 bg-white/[0.04] text-zinc-100 hover:bg-white/10"
+                )}
+                onClick={onStart}
+                type="button"
+              >
+                {plan.cta}
+              </button>
+            </motion.article>
+          ))}
+        </motion.div>
+      </section>
+    </AuroraHero>
+  );
+}
+
 function AuthScreen({
   initialMode,
+  onAuthenticated,
   onNavigate,
   status
 }: {
   initialMode: AuthMode;
-  onNavigate: (path: string) => void;
+  onAuthenticated: (nextSession: Session) => void;
+  onNavigate: (path: string, options?: { replace?: boolean }) => void;
   status: AuthStatus;
 }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [signUpComplete, setSignUpComplete] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -575,11 +806,13 @@ function AuthScreen({
 
   useEffect(() => {
     setMode(initialMode);
+    if (initialMode === "sign_in") setPasswordConfirmation("");
   }, [initialMode]);
 
   useEffect(() => {
     if (status === "verified") {
       setMode("sign_in");
+      setPasswordConfirmation("");
       setNotice("邮箱已验证。你现在可以输入注册时设置的密码登录。");
       setError(null);
       setSignUpComplete(false);
@@ -588,11 +821,25 @@ function AuthScreen({
 
     if (status === "pending_confirmation") {
       setMode("sign_in");
+      setPasswordConfirmation("");
       setNotice("请先打开注册邮件完成邮箱验证，验证成功后再用密码登录。");
       setError(null);
       setSignUpComplete(false);
     }
   }, [status]);
+
+  function moveToSignInAfterSignup(result: SignUpConfirmationResult) {
+    const normalizedEmail = normalizeAuthEmail(result.email);
+
+    setEmail(normalizedEmail);
+    setPassword("");
+    setPasswordConfirmation("");
+    setMode("sign_in");
+    setNotice(getSignupConfirmationNotice());
+    setError(null);
+    setSignUpComplete(false);
+    onNavigate("/auth?mode=sign_in", { replace: true });
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -611,18 +858,13 @@ function AuthScreen({
       return;
     }
 
-    if (mode === "sign_up") {
-      const record = getSignupConfirmationRecord(normalizedEmail);
-
-      if (record) {
-        setNotice(getSignupConfirmationNotice(record));
-        setSignUpComplete(true);
-        return;
-      }
-    }
-
     if (password.length < 6) {
       setError("密码至少需要 6 位。");
+      return;
+    }
+
+    if (mode === "sign_up" && password !== passwordConfirmation) {
+      setError("两次输入的密码不一致。");
       return;
     }
 
@@ -636,10 +878,9 @@ function AuthScreen({
           redirectTo: `${window.location.origin}/auth?mode=sign_in&verified=1`
         });
 
-        const record = rememberSignupConfirmationEmail(normalizedEmail, signUpResult);
+        rememberSignupConfirmationEmail(normalizedEmail, signUpResult);
 
-        setNotice(getSignupConfirmationNotice(record));
-        setSignUpComplete(true);
+        moveToSignInAfterSignup(signUpResult);
       } else {
         const { data, error: signInError } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
@@ -654,15 +895,31 @@ function AuthScreen({
         }
 
         clearSignupConfirmationEmail(normalizedEmail);
+        if (data.session) onAuthenticated(data.session);
         onNavigate("/app");
       }
     } catch (authError) {
       const message = authError instanceof Error ? authError.message : "认证失败";
-      setError(getAuthErrorMessage(message));
+      const friendlyMessage = getAuthErrorMessage(message);
+
+      if (friendlyMessage.includes("已注册")) {
+        clearSignupConfirmationEmail(normalizedEmail);
+        setEmail(normalizedEmail);
+        setMode("sign_in");
+        setPassword("");
+        setPasswordConfirmation("");
+        setNotice(null);
+        onNavigate("/auth?mode=sign_in", { replace: true });
+      }
+
+      setError(friendlyMessage);
     } finally {
       setSubmitting(false);
     }
   }
+
+  const statusMessage = error ?? notice;
+  const statusTone = error ? "error" : notice ? "success" : null;
 
   return (
     <AuroraHero className="min-h-dvh">
@@ -673,15 +930,12 @@ function AuthScreen({
           initial={{ opacity: 0, y: 20 }}
           transition={{ duration: 0.46, ease: "easeOut" }}
         >
-          <p className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-4 py-2 text-sm font-medium text-emerald-100">
-            <MailCheck aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
-            邮箱验证有效期 24 小时
-          </p>
-          <h1 className="mt-5 text-[clamp(2.6rem,8vw,5.8rem)] font-bold leading-none tracking-normal text-white">
-            QingNest
-          </h1>
+          <h1 className="sr-only">QingNest</h1>
+          <div className="aspect-[4/1] w-full max-w-[40rem] overflow-visible">
+            <TextHoverEffect revealRadius={540} text="QingNest" />
+          </div>
           <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300 sm:text-lg">
-            注册后会立刻发送验证邮件。邮箱验证成功前不能登录进入工作台；验证后可以从邮件直接进入，也可以回到这里用密码登录。
+            一键发布静态站点，自动检查文件风险，注册即赠永久域名，让 AI 页面和个人作品更快上线分享。
           </p>
         </motion.div>
 
@@ -696,15 +950,15 @@ function AuthScreen({
             {(["sign_in", "sign_up"] as const).map((item) => (
               <button
                 className={cn(
-                  "h-10 rounded-md text-sm font-semibold transition-colors",
-                  mode === item ? "bg-white text-black" : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                  AUTH_TOGGLE_BUTTON_CLASS,
+                  mode === item ? AUTH_TOGGLE_ACTIVE_CLASS : AUTH_TOGGLE_INACTIVE_CLASS
                 )}
                 key={item}
                 onClick={() => {
                   setMode(item);
                   setError(null);
-                  setNotice(null);
                   setSignUpComplete(false);
+                  setPasswordConfirmation("");
                 }}
                 type="button"
               >
@@ -733,37 +987,103 @@ function AuthScreen({
           <label className="mt-4 block text-sm font-medium text-zinc-200" htmlFor="auth-password">
             密码
           </label>
-          <input
-            autoComplete={mode === "sign_in" ? "current-password" : "new-password"}
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
-            id="auth-password"
-            onChange={(event) => {
-              setPassword(event.target.value);
-              setSignUpComplete(false);
-            }}
-            placeholder="至少 6 位"
-            required
-            type="password"
-            value={password}
-          />
+          <div className="relative mt-2">
+            <input
+              autoComplete={mode === "sign_in" ? "current-password" : "new-password"}
+              className="h-11 w-full rounded-lg border border-white/10 bg-black/40 py-0 pl-3 pr-11 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
+              id="auth-password"
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setSignUpComplete(false);
+              }}
+              placeholder="至少 6 位"
+              required
+              type={passwordVisible ? "text" : "password"}
+              value={password}
+            />
+            <button
+              aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
+              className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              type="button"
+            >
+              {passwordVisible ? (
+                <EyeOff aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+              ) : (
+                <Eye aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+              )}
+            </button>
+          </div>
 
-          {notice ? (
-            <p className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3 text-sm leading-6 text-emerald-100">
-              {notice}
-            </p>
+          {mode === "sign_up" ? (
+            <>
+              <label className="mt-4 block text-sm font-medium text-zinc-200" htmlFor="auth-password-confirmation">
+                确认密码
+              </label>
+              <div className="relative mt-2">
+                <input
+                  autoComplete="new-password"
+                  className="h-11 w-full rounded-lg border border-white/10 bg-black/40 py-0 pl-3 pr-11 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
+                  id="auth-password-confirmation"
+                  onChange={(event) => {
+                    setPasswordConfirmation(event.target.value);
+                    setSignUpComplete(false);
+                  }}
+                  placeholder="再次输入密码"
+                  required
+                  type={passwordVisible ? "text" : "password"}
+                  value={passwordConfirmation}
+                />
+                <button
+                  aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
+                  className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                  onClick={() => setPasswordVisible((visible) => !visible)}
+                  type="button"
+                >
+                  {passwordVisible ? (
+                    <EyeOff aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                  ) : (
+                    <Eye aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />
+                  )}
+                </button>
+              </div>
+            </>
           ) : null}
-          {error ? (
-            <p className="mt-4 rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-3 text-sm leading-6 text-rose-100">
-              {error}
-            </p>
-          ) : null}
+
+          <div className="mt-2 h-8 overflow-hidden">
+            <AnimatePresence initial={false} mode="wait">
+              {statusMessage ? (
+                <motion.p
+                  animate={{ opacity: 1, y: 0 }}
+                  className={cn(
+                    "flex h-full items-center gap-1.5 overflow-hidden rounded-lg border px-2.5 text-[11px] leading-none",
+                    statusTone === "error"
+                      ? "border-rose-300/20 bg-rose-400/10 text-rose-100"
+                      : "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+                  )}
+                  exit={{ opacity: 0, y: -6 }}
+                  initial={{ opacity: 0, y: 6 }}
+                  key={`${statusTone}:${statusMessage}`}
+                  title={statusMessage}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                >
+                  {statusTone === "error" ? (
+                    <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
+                  ) : (
+                    <BadgeCheck aria-hidden="true" className="h-3.5 w-3.5 shrink-0" strokeWidth={1.9} />
+                  )}
+                  <span className="min-w-0 truncate whitespace-nowrap leading-none">{statusMessage}</span>
+                </motion.p>
+              ) : null}
+            </AnimatePresence>
+          </div>
 
           <HoverBorderGradient
             alwaysOn
             aria-label={mode === "sign_in" ? "登录" : "注册"}
             as="button"
-            className="mt-6 h-11 w-full bg-white text-black hover:bg-zinc-100"
-            containerClassName="w-full rounded-full"
+            className={cn("h-11 w-full", PRIMARY_CTA_BUTTON_CLASS)}
+            containerClassName="mt-4 w-full rounded-full"
             disabled={submitting || (mode === "sign_up" && signUpComplete)}
             type="submit"
           >
@@ -860,9 +1180,7 @@ function DashboardScreen({
     }
   }
 
-  async function handleArchiveChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-
+  async function handleSelectedArchive(file: File | null, resetInput?: () => void) {
     setMessage(null);
     setError(null);
     setArchiveFile(null);
@@ -874,7 +1192,7 @@ function DashboardScreen({
 
     if (!isAcceptedArchive(file)) {
       setError("请上传 ZIP 格式的静态站点压缩包。");
-      event.target.value = "";
+      resetInput?.();
       return;
     }
 
@@ -889,10 +1207,14 @@ function DashboardScreen({
     } catch (scanError) {
       const text = scanError instanceof Error ? scanError.message : "ZIP 扫描失败";
       setError(text);
-      event.target.value = "";
+      resetInput?.();
     } finally {
       setScanningArchive(false);
     }
+  }
+
+  function handleFileUpload(files: File[]) {
+    void handleSelectedArchive(files[0] ?? null);
   }
 
   async function handlePublishArchive() {
@@ -963,7 +1285,7 @@ function DashboardScreen({
             <HoverBorderGradient
               alwaysOn
               as="button"
-              className="mt-6 h-11 bg-white text-black hover:bg-zinc-100"
+              className={cn("mt-6 h-11", PRIMARY_CTA_BUTTON_CLASS)}
               onClick={() => onNavigate("/auth")}
               type="button"
             >
@@ -1122,16 +1444,9 @@ function DashboardScreen({
                     </span>
                   </div>
 
-                  <label className="mt-5 grid gap-2 text-sm font-medium text-zinc-200">
-                    站点包
-                    <input
-                      accept=".zip,application/zip,application/x-zip-compressed"
-                      className="block w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-zinc-200 file:mr-4 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-black hover:file:bg-zinc-100 focus:border-cyan-300 focus:outline-none"
-                      disabled={publishing}
-                      onChange={handleArchiveChange}
-                      type="file"
-                    />
-                  </label>
+                  <div className="mt-5">
+                    <FileUpload disabled={publishing} files={archiveFile ? [archiveFile] : []} onChange={handleFileUpload} />
+                  </div>
 
                   {scanningArchive ? (
                     <p className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-300">
@@ -1199,6 +1514,140 @@ function DashboardScreen({
                 </div>
               </div>
             ) : null}
+          </div>
+        </div>
+      </section>
+    </AuroraHero>
+  );
+}
+
+function ProfileScreen({
+  account,
+  authReady,
+  onNavigate,
+  session
+}: {
+  account: AccountProfile | null;
+  authReady: boolean;
+  onNavigate: (path: string) => void;
+  session: Session | null;
+}) {
+  const [signingOut, setSigningOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!authReady) {
+    return <LoadingScreen label="正在读取账号" />;
+  }
+
+  if (!session) {
+    return <LoadingScreen label="正在跳转登录" />;
+  }
+
+  const emailConfirmed = account?.emailConfirmed ?? isSessionEmailConfirmed(session);
+  const roleLabel = account?.role === "admin" ? "管理员" : "用户";
+  const displayEmail = account?.email ?? session.user.email ?? "未绑定邮箱";
+  const createdAt = account?.createdAt ?? session.user.created_at;
+  const createdDate = createdAt ? new Date(createdAt).toLocaleDateString("zh-CN") : "未知";
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    setError(null);
+
+    try {
+      await supabase?.auth.signOut();
+      onNavigate("/");
+    } catch (signOutError) {
+      setError(signOutError instanceof Error ? signOutError.message : "退出登录失败");
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
+  return (
+    <AuroraHero className="min-h-dvh">
+      <section className={cn(CONTENT_TRACK_CLASS, "min-h-dvh pb-10 pt-24")}>
+        <div className="mx-auto max-w-3xl">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100">
+                <UserRound className="h-4 w-4" />
+                个人中心
+              </p>
+              <h1 className="mt-4 text-3xl font-semibold tracking-normal text-white">账号信息</h1>
+            </div>
+            <button
+              className="inline-flex h-10 w-fit items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+              onClick={() => onNavigate("/app")}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              创建站点
+            </button>
+          </div>
+
+          <div className="glass-surface mt-6 rounded-lg p-5 sm:p-6">
+            <div className="flex items-start gap-4">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white">
+                {account?.role === "admin" ? <Crown className="h-6 w-6" /> : <UserRound className="h-6 w-6" />}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-base font-semibold text-white">{displayEmail}</p>
+                <p className="mt-1 text-sm font-medium text-zinc-500">{roleLabel} · {account?.plan ?? "free"}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {[
+                ["邮箱状态", emailConfirmed ? "已验证" : "未验证"],
+                ["套餐", account?.plan ?? "free"],
+                ["注册时间", createdDate]
+              ].map(([label, value]) => (
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3" key={label}>
+                  <p className="text-xs font-medium text-zinc-500">{label}</p>
+                  <p className="mt-1 text-sm font-semibold text-zinc-100">{value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div
+              className={cn(
+                "mt-5 flex items-start gap-3 rounded-lg border px-3 py-3 text-sm leading-6",
+                emailConfirmed
+                  ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+                  : "border-amber-300/20 bg-amber-400/10 text-amber-100"
+              )}
+            >
+              {emailConfirmed ? <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <Lock className="mt-0.5 h-4 w-4 shrink-0" />}
+              <span>{emailConfirmed ? "邮箱已验证，可以发布站点。" : "邮箱未验证，创建站点前必须验证。"}</span>
+            </div>
+
+            {error ? (
+              <p className="mt-4 rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-3 text-sm leading-6 text-rose-100">
+                {error}
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+              {account?.role === "admin" ? (
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+                  onClick={() => onNavigate("/admin")}
+                  type="button"
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  管理员面板
+                </button>
+              ) : null}
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                disabled={signingOut}
+                onClick={handleSignOut}
+                type="button"
+              >
+                {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                退出登录
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -1357,7 +1806,7 @@ function RouteMessage({
           <HoverBorderGradient
             alwaysOn
             as="button"
-            className="mt-6 h-11 bg-white text-black hover:bg-zinc-100"
+            className={cn("mt-6 h-11", PRIMARY_CTA_BUTTON_CLASS)}
             onClick={onAction}
             type="button"
           >
@@ -1395,6 +1844,7 @@ export function App() {
   const pathname = location.pathname;
   const isHomeRoute = isHomePathname(pathname);
   const firstScreen = isHomeRoute && page === 0;
+  const isProtectedRoute = pathname === "/app" || pathname === "/profile";
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
 
@@ -1412,11 +1862,32 @@ export function App() {
 
   const goToPage = useCallback(
     (nextPage: number) => {
-      if (nextPage === page) return;
+      const boundedNextPage = clampHomePage(nextPage);
+      const nextPath = getHomePathForPage(boundedNextPage);
 
-      setAnimateBrand(isHomeRoute && ((page === 0 && nextPage === 1) || (page === 1 && nextPage === 0)));
-      setDirection(nextPage > page ? 1 : -1);
-      setPage(nextPage);
+      if (boundedNextPage === page) {
+        if (isHomeRoute && typeof window !== "undefined") {
+          const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          if (currentPath !== nextPath) {
+            window.history.pushState({}, "", nextPath);
+            setLocation(getBrowserLocation());
+          }
+        }
+
+        return;
+      }
+
+      setAnimateBrand(isHomeRoute && ((page === 0 && boundedNextPage === 1) || (page === 1 && boundedNextPage === 0)));
+      setDirection(boundedNextPage > page ? 1 : -1);
+      setPage(boundedNextPage);
+
+      if (isHomeRoute && typeof window !== "undefined") {
+        const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (currentPath !== nextPath) {
+          window.history.pushState({}, "", nextPath);
+          setLocation(getBrowserLocation());
+        }
+      }
     },
     [isHomeRoute, page]
   );
@@ -1430,12 +1901,23 @@ export function App() {
   useEffect(() => {
     if (!isHomeRoute) return;
 
+    const nextPage = getHomePageFromHash(location.hash);
+    if (nextPage === page) return;
+
+    setAnimateBrand((page === 0 && nextPage === 1) || (page === 1 && nextPage === 0));
+    setDirection(nextPage > page ? 1 : -1);
+    setPage(nextPage);
+  }, [isHomeRoute, location.hash, page]);
+
+  useEffect(() => {
+    if (!isHomeRoute) return;
+
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
 
       if (wheelLockRef.current || Math.abs(event.deltaY) < 16) return;
 
-      const nextPage = event.deltaY > 0 ? 1 : 0;
+      const nextPage = event.deltaY > 0 ? Math.min(page + 1, LAST_HOME_PAGE_INDEX) : Math.max(page - 1, 0);
       if (nextPage === page) return;
 
       wheelLockRef.current = true;
@@ -1541,6 +2023,12 @@ export function App() {
     }
   }, [authReady, navigate, pathname, session]);
 
+  useEffect(() => {
+    if (!authReady || session || !isProtectedRoute) return;
+
+    navigate("/auth?mode=sign_in", { replace: true });
+  }, [authReady, isProtectedRoute, navigate, session]);
+
   let routeContent: React.ReactNode;
 
   if (isHomeRoute) {
@@ -1561,14 +2049,20 @@ export function App() {
               onNext={() => goToPage(1)}
               onStart={() => navigate(session ? "/app" : "/auth?mode=sign_up")}
             />
-          ) : (
+          ) : page === 1 ? (
             <StepsScreen />
+          ) : (
+            <PricingScreen onStart={() => navigate(session ? "/app" : "/auth?mode=sign_up")} />
           )}
         </motion.div>
       </AnimatePresence>
     );
   } else if (pathname === "/auth") {
-    routeContent = <AuthScreen initialMode={authMode} onNavigate={navigate} status={authStatus} />;
+    routeContent = <AuthScreen initialMode={authMode} onAuthenticated={setSession} onNavigate={navigate} status={authStatus} />;
+  } else if (isProtectedRoute && authReady && !session) {
+    routeContent = <LoadingScreen label="正在跳转登录" />;
+  } else if (pathname === "/profile") {
+    routeContent = <ProfileScreen account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else if (pathname === "/admin") {
     routeContent = <AdminScreen account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else {
@@ -1579,11 +2073,12 @@ export function App() {
     <main className={cn("fixed inset-0 h-dvh w-screen bg-black text-white", isHomeRoute ? "overflow-hidden" : "overflow-y-auto")}>
       <LayoutGroup>
         <SiteNavbar
+          account={account}
           animateBrand={animateBrand}
           authReady={authReady}
-          compact={page === 1 || !isHomeRoute}
+          compact={page !== 0 || !isHomeRoute}
           firstScreen={firstScreen}
-          isAuthenticated={Boolean(session)}
+          isAuthenticated={Boolean(session && isSessionEmailConfirmed(session))}
           onNavigate={navigate}
         />
         {routeContent}

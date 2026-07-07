@@ -5,10 +5,14 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  const env = loadEnv(mode, repoRoot, "");
+  const webRoot = path.resolve(repoRoot, "apps/web");
+  const env = {
+    ...loadEnv(mode, repoRoot, ""),
+    ...loadEnv(mode, webRoot, "")
+  };
 
   return {
-    root: path.resolve(repoRoot, "apps/web"),
+    root: webRoot,
     plugins: [react()],
     resolve: {
       alias: {

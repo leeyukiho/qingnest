@@ -39,8 +39,8 @@ export function HoverBorderGradient({
       />
       <Component
         className={cn(
-          "relative z-10 inline-flex h-12 items-center justify-center gap-2 rounded-full border border-white/10 bg-white px-5 text-sm font-semibold text-black dark:bg-black dark:text-white",
-          "transition-colors duration-200 hover:bg-zinc-100 dark:hover:bg-zinc-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+          "relative z-10 inline-flex h-12 items-center justify-center gap-2 rounded-full border border-white/10 bg-white px-5 text-sm font-semibold text-black",
+          "transition-colors duration-200 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black",
           "disabled:pointer-events-none disabled:opacity-55",
           className
         )}

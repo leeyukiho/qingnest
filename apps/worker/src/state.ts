@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import type { User } from "@supabase/supabase-js";
 import { unzipSync } from "fflate";
 import { getPlanConfig, getPublicSiteUrl, platformConfig, validateSubdomain } from "@qingnest/shared/config/platform";
 import { getContentType } from "@qingnest/shared/deployment/mime";
@@ -177,7 +178,7 @@ function assertAllowedAuthRedirect(env: Env, redirectTo: string) {
 
 function getSignUpErrorMessage(message: string) {
   if (/already registered|already exists/i.test(message)) {
-    return "这个邮箱已经注册，可以直接登录。";
+    return "邮箱已注册，可直接登录。";
   }
 
   if (/rate limit|too many|over_email_send_rate_limit/i.test(message)) {
@@ -314,6 +315,54 @@ async function rollbackGeneratedSignup(
   await clearSignupConfirmationSendLock(serviceSupabase, input.email);
 }
 
+function isAuthUserEmailConfirmed(user: User) {
+  return Boolean(user.email_confirmed_at ?? user.confirmed_at);
+}
+
+async function findAuthUserByEmail(serviceSupabase: ReturnType<typeof createServiceSupabase>, email: string) {
+  const perPage = 1000;
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await serviceSupabase.auth.admin.listUsers({ page, perPage });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const user = data.users.find((candidate) => normalizeEmail(candidate.email ?? "") === email);
+
+    if (user) return user;
+    if (data.users.length < perPage) return null;
+  }
+
+  throw new Error("用户数量过多，无法确认邮箱状态");
+}
+
+async function updatePendingSignupPassword(
+  serviceSupabase: ReturnType<typeof createServiceSupabase>,
+  input: { email: string; password: string }
+) {
+  const user = await findAuthUserByEmail(serviceSupabase, input.email);
+
+  if (!user) {
+    await clearSignupConfirmationSendLock(serviceSupabase, input.email);
+    throw new Error("验证记录已失效，请重新注册。");
+  }
+
+  if (isAuthUserEmailConfirmed(user)) {
+    await clearSignupConfirmationSendLock(serviceSupabase, input.email);
+    throw new Error("邮箱已注册，可直接登录。");
+  }
+
+  const { error } = await serviceSupabase.auth.admin.updateUserById(user.id, {
+    password: input.password
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export async function signUpWithEmailPassword(
   env: Env,
   input: { email?: string; password?: string; redirectTo?: string }
@@ -337,6 +386,13 @@ export async function signUpWithEmailPassword(
   assertAllowedAuthRedirect(env, input.redirectTo);
 
   const serviceSupabase = createServiceSupabase(env);
+  const existingUser = await findAuthUserByEmail(serviceSupabase, email);
+
+  if (existingUser && isAuthUserEmailConfirmed(existingUser)) {
+    await clearSignupConfirmationSendLock(serviceSupabase, email);
+    throw new Error("邮箱已注册，可直接登录。");
+  }
+
   const { data: claims, error: claimError } = await serviceSupabase.rpc("claim_signup_confirmation_email", {
     p_email: email,
     p_ttl_seconds: SIGNUP_CONFIRMATION_TTL_SECONDS
@@ -353,6 +409,11 @@ export async function signUpWithEmailPassword(
   }
 
   if (!claim.claimed) {
+    await updatePendingSignupPassword(serviceSupabase, {
+      email,
+      password: input.password
+    });
+
     return {
       email,
       alreadySent: true,

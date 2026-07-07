@@ -174,6 +174,144 @@ a {
   }
 }
 
+.cover-warp {
+  border-radius: 9999px;
+  color: inherit;
+  transition:
+    color 180ms ease,
+    filter 180ms ease,
+    transform 180ms ease;
+}
+
+.cover-warp::before {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(34, 211, 238, 0.32);
+  border-radius: inherit;
+  background: rgba(8, 47, 73, 0.18);
+  box-shadow:
+    inset 0 0 18px rgba(34, 211, 238, 0.16),
+    0 0 28px rgba(34, 211, 238, 0.1);
+  content: "";
+  opacity: 0;
+  transform: scaleX(0.88);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.group:hover .cover-warp,
+.cover-warp:hover {
+  animation: coverTension 520ms steps(2, end) infinite;
+  color: #ecfeff;
+  filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.62));
+}
+
+.group:hover .cover-warp::before,
+.cover-warp:hover::before {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.cover-warp-line {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(103, 232, 249, 0.95), transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cover-warp-line-a {
+  top: 28%;
+}
+
+.cover-warp-line-b {
+  bottom: 22%;
+}
+
+.group:hover .cover-warp-line-a,
+.cover-warp:hover .cover-warp-line-a {
+  animation: coverScanA 760ms linear infinite;
+  opacity: 1;
+}
+
+.group:hover .cover-warp-line-b,
+.cover-warp:hover .cover-warp-line-b {
+  animation: coverScanB 680ms linear infinite;
+  opacity: 0.85;
+}
+
+.cover-warp-flash {
+  position: absolute;
+  inset: -35% -22%;
+  background: linear-gradient(110deg, transparent 18%, rgba(255, 255, 255, 0.32) 46%, transparent 62%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-45%);
+}
+
+.group:hover .cover-warp-flash,
+.cover-warp:hover .cover-warp-flash {
+  animation: coverFlash 1.1s ease-in-out infinite;
+}
+
+@keyframes coverTension {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) skewX(0deg);
+  }
+
+  25% {
+    transform: translate3d(1px, -1px, 0) skewX(-2deg);
+  }
+
+  50% {
+    transform: translate3d(-1px, 1px, 0) skewX(2deg);
+  }
+
+  75% {
+    transform: translate3d(1px, 0, 0) skewX(-1deg);
+  }
+}
+
+@keyframes coverScanA {
+  from {
+    transform: translateY(-7px) scaleX(0.55);
+  }
+
+  to {
+    transform: translateY(8px) scaleX(1);
+  }
+}
+
+@keyframes coverScanB {
+  from {
+    transform: translateY(7px) scaleX(1);
+  }
+
+  to {
+    transform: translateY(-8px) scaleX(0.58);
+  }
+}
+
+@keyframes coverFlash {
+  0% {
+    opacity: 0;
+    transform: translateX(-45%);
+  }
+
+  42% {
+    opacity: 0.85;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(45%);
+  }
+}
+
 @keyframes fadeInUp {
   from {
     opacity: 0;
