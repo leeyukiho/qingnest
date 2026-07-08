@@ -15,6 +15,22 @@ type FileEntry = FileSystemFileEntry & {
   file: (callback: (file: File) => void) => void;
 };
 
+type BrowserFileHandle = {
+  getFile: () => Promise<File>;
+  kind: "file";
+  name: string;
+};
+
+type BrowserDirectoryHandle = {
+  entries: () => AsyncIterable<[string, BrowserFileHandle | BrowserDirectoryHandle]>;
+  kind: "directory";
+  name: string;
+};
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (options?: { mode?: "read" }) => Promise<BrowserDirectoryHandle>;
+};
+
 type FileUploadProps = {
   accept?: string;
   allowDirectories?: boolean;
@@ -27,7 +43,7 @@ type FileUploadProps = {
 function withRelativePath(file: File, path: string) {
   Object.defineProperty(file, "webkitRelativePath", {
     configurable: true,
-    value: path.replace(/^\/+/, "/").slice(1)
+    value: path.replace(/\\/g, "/").replace(/^\/+/, "")
   });
 
   return file;
@@ -68,6 +84,22 @@ async function collectEntryFiles(entry: FileSystemEntry): Promise<File[]> {
   const children = await readEntries(entry as DirectoryEntry);
   const nested = await Promise.all(children.map(collectEntryFiles));
   return nested.flat();
+}
+
+async function collectDirectoryHandleFiles(directory: BrowserDirectoryHandle, prefix = directory.name): Promise<File[]> {
+  const files: File[] = [];
+
+  for await (const [, handle] of directory.entries()) {
+    const path = `${prefix}/${handle.name}`;
+
+    if (handle.kind === "file") {
+      files.push(withRelativePath(await handle.getFile(), path));
+    } else {
+      files.push(...(await collectDirectoryHandleFiles(handle, path)));
+    }
+  }
+
+  return files;
 }
 
 async function getDroppedFiles(event: DragEvent<HTMLDivElement>) {
@@ -116,16 +148,36 @@ export function FileUpload({
     onChange([]);
   }
 
+  async function chooseDirectory(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (disabled) return;
+
+    const showDirectoryPicker = (window as DirectoryPickerWindow).showDirectoryPicker;
+
+    if (showDirectoryPicker) {
+      try {
+        onChange(await collectDirectoryHandleFiles(await showDirectoryPicker({ mode: "read" })));
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          throw error;
+        }
+      }
+
+      return;
+    }
+
+    directoryInputRef.current?.click();
+  }
+
   return (
     <div
       className={cn(
-        "group relative mx-auto flex min-h-64 w-full max-w-4xl cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed p-6 text-center transition-colors",
+        "group relative mx-auto flex min-h-64 w-full max-w-4xl flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed bg-black p-6 text-center transition-colors",
         dragging
-          ? "border-cyan-300 bg-cyan-300/10"
-          : "border-neutral-700 bg-black/35 hover:border-cyan-300/70 hover:bg-white/[0.04]",
+          ? "border-white bg-white/[0.03]"
+          : "border-white/15 hover:border-white/40 hover:bg-white/[0.02]",
         disabled && "pointer-events-none opacity-60"
       )}
-      onClick={() => fileInputRef.current?.click()}
       onDragLeave={() => setDragging(false)}
       onDragOver={(event) => {
         event.preventDefault();
@@ -136,14 +188,6 @@ export function FileUpload({
         setDragging(false);
         emitFiles(await getDroppedFiles(event));
       }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          fileInputRef.current?.click();
-        }
-      }}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
     >
       <input
         ref={fileInputRef}
@@ -172,9 +216,9 @@ export function FileUpload({
         />
       ) : null}
 
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.13),transparent_42%)] opacity-80" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
       <div className="relative z-10 flex flex-col items-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-cyan-100 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-black text-zinc-100 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
           {selectedFile ? hasMultipleFiles ? <FolderUp className="h-6 w-6" /> : <FileArchive className="h-6 w-6" /> : <UploadCloud className="h-6 w-6" />}
         </span>
         <p className="mt-5 text-base font-semibold text-white">
@@ -186,13 +230,21 @@ export function FileUpload({
             : "支持直接上传包含 index.html 的文件夹、多个文件、单个 HTML 文件，也兼容 ZIP。"}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <button
+            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 bg-black px-3 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/[0.06] hover:text-white"
+            onClick={(event) => {
+              event.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            type="button"
+          >
+            <FileArchive className="h-4 w-4" />
+            选择文件
+          </button>
           {allowDirectories ? (
             <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
-              onClick={(event) => {
-                event.stopPropagation();
-                directoryInputRef.current?.click();
-              }}
+              className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 bg-black px-3 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/[0.06] hover:text-white"
+              onClick={chooseDirectory}
               type="button"
             >
               <FolderUp className="h-4 w-4" />
@@ -201,7 +253,7 @@ export function FileUpload({
           ) : null}
           {selectedFile ? (
             <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+              className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 bg-black px-3 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/[0.06] hover:text-white"
               onClick={clearFiles}
               type="button"
             >

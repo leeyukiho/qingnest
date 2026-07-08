@@ -1,0 +1,13 @@
+name = "qingnest-worker"
+main = "src/index.ts"
+compatibility_date = "2026-07-05"
+keep_vars = true
+workers_dev = false
+
+[[r2_buckets]]
+binding = "SITE_ASSETS"
+bucket_name = "qingnest-sites-dev"
+
+[[kv_namespaces]]
+binding = "DOMAIN_MAP"
+id = "a363acec72534db49c2b449202cb1f81"

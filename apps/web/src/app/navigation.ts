@@ -1,0 +1,53 @@
+import { LAST_HOME_PAGE_INDEX } from "@/app/ui";
+
+export const STUDIO_PATH = "/studio";
+export const STUDIO_PROFILE_PATH = `${STUDIO_PATH}/profile`;
+export const STUDIO_ADMIN_PATH = `${STUDIO_PATH}/admin`;
+
+export type AppLocation = {
+  pathname: string;
+  search: string;
+  hash: string;
+};
+
+export function getBrowserLocation(): AppLocation {
+  if (typeof window === "undefined") {
+    return { pathname: "/", search: "", hash: "" };
+  }
+
+  return {
+    pathname: window.location.pathname,
+    search: window.location.search,
+    hash: window.location.hash
+  };
+}
+
+export function isHomePathname(pathname: string) {
+  return pathname === "/" || pathname === "/index.html";
+}
+
+export function isStudioPathname(pathname: string) {
+  return pathname === STUDIO_PATH || pathname === STUDIO_PROFILE_PATH || pathname === STUDIO_ADMIN_PATH;
+}
+
+export function clampHomePage(page: number) {
+  return Math.max(0, Math.min(LAST_HOME_PAGE_INDEX, page));
+}
+
+export function getHomePageFromHash(hash: string) {
+  if (hash === "#pricing") return 2;
+  if (hash === "#steps") return 1;
+  return 0;
+}
+
+export function getHomePathForPage(page: number) {
+  if (page === 2) return "/#pricing";
+  if (page === 1) return "/#steps";
+  return "/";
+}
+
+export function getInitialPage() {
+  if (typeof window === "undefined") return 0;
+
+  return isHomePathname(window.location.pathname) ? getHomePageFromHash(window.location.hash) : 0;
+}

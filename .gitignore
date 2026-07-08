@@ -57,6 +57,7 @@ signing_keys.json
 wrangler.toml
 wrangler.json
 wrangler.jsonc
+!apps/worker/wrangler.toml
 
 # Supabase local state.
 # Keep supabase/config.toml, migrations, seed.sql, and templates versioned.

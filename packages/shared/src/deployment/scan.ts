@@ -9,11 +9,29 @@ export type ScanInputFile = {
 };
 
 export function normalizeDeploymentPath(path: string) {
-  return path.replace(/\\/g, "/").replace(/^\/+/, "");
+  return path
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((part) => part.length > 0 && part !== ".")
+    .join("/");
 }
 
 function isPathTraversal(path: string) {
   return path.split("/").some((part) => part === "..");
+}
+
+function isArchiveMetadataPath(path: string) {
+  const normalized = normalizeDeploymentPath(path);
+  const lowerPath = normalized.toLowerCase();
+
+  return (
+    lowerPath === ".ds_store" ||
+    lowerPath.endsWith("/.ds_store") ||
+    lowerPath === "thumbs.db" ||
+    lowerPath.endsWith("/thumbs.db") ||
+    lowerPath === "__macosx" ||
+    lowerPath.startsWith("__macosx/")
+  );
 }
 
 function startsWithBlockedPath(path: string) {
@@ -25,10 +43,12 @@ function startsWithBlockedPath(path: string) {
 }
 
 function normalizeFiles<T extends ScanInputFile>(inputFiles: T[]) {
-  return inputFiles.map((file) => ({
-    ...file,
-    path: normalizeDeploymentPath(file.path)
-  }));
+  return inputFiles
+    .map((file) => ({
+      ...file,
+      path: normalizeDeploymentPath(file.path)
+    }))
+    .filter((file) => !isArchiveMetadataPath(file.path));
 }
 
 function scoreHtmlRisk(file: ScanInputFile) {
@@ -121,6 +141,28 @@ function stripRootDirectory<T extends ScanInputFile>(files: T[], root: string) {
       path: file.path.slice(prefix.length)
     }))
     .filter((file) => file.path.length > 0);
+}
+
+function hasSameDeploymentPaths<T extends ScanInputFile>(left: T[], right: T[]) {
+  return left.length === right.length && left.every((file, index) => file.path === right[index]?.path);
+}
+
+function isHtmlPath(path: string) {
+  const lowerPath = path.toLowerCase();
+  return lowerPath.endsWith(".html") || lowerPath.endsWith(".htm");
+}
+
+function prepareSingleHtmlEntrypoint<T extends ScanInputFile>(files: T[]) {
+  if (files.length !== 1 || !isHtmlPath(files[0].path)) {
+    return files;
+  }
+
+  return [
+    {
+      ...files[0],
+      path: platformConfig.deployment.entrypoints[0] ?? "index.html"
+    }
+  ];
 }
 
 export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "free"): DeploymentScanResult {
@@ -256,7 +298,7 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
 }
 
 export function prepareDeploymentFiles<T extends ScanInputFile>(inputFiles: T[], planName = "free") {
-  const normalizedFiles = normalizeFiles(inputFiles);
+  const normalizedFiles = prepareSingleHtmlEntrypoint(normalizeFiles(inputFiles));
   let files = normalizedFiles;
   const sourceRoots: string[] = [];
 
@@ -284,7 +326,7 @@ export function prepareDeploymentFiles<T extends ScanInputFile>(inputFiles: T[],
 
     const nextFiles = stripRootDirectory(files, nextRoot);
 
-    if (nextFiles.length === 0 || nextFiles.length === files.length) {
+    if (nextFiles.length === 0 || hasSameDeploymentPaths(nextFiles, files)) {
       return {
         files,
         sourceRoot: sourceRoots.length > 0 ? sourceRoots.join("/") : null,
