@@ -8,15 +8,16 @@ import { StudioSidebar } from "@/app/StudioSidebar";
 import { isSessionEmailConfirmed } from "@/app/auth";
 import { STUDIO_ADMIN_PATH, STUDIO_PATH } from "@/app/navigation";
 import { LoadingScreen } from "@/app/feedback";
+import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_SECTION_CLASS } from "@/app/ui";
 import { cn } from "@/lib/utils";
 
 export function ProfilePage({
-  account,
+  account,
   authReady,
   onNavigate,
   session
 }: {
-  account: AccountProfile | null;
+  account: AccountProfile | null;
   authReady: boolean;
   onNavigate: (path: string) => void;
   session: Session | null;
@@ -28,14 +29,14 @@ export function ProfilePage({
     return <LoadingScreen label="正在读取账号" />;
   }
 
-  if (!session) {
+  if (!session) {
     return <LoadingScreen label="正在跳转登录" />;
   }
 
-  const emailConfirmed = account?.emailConfirmed ?? isSessionEmailConfirmed(session);
+  const emailConfirmed = account?.emailConfirmed ?? isSessionEmailConfirmed(session);
   const roleLabel = account?.role === "admin" ? "管理员" : "用户";
-  const displayEmail = account?.email ?? session.user.email ?? "未绑定邮箱";
-  const createdAt = account?.createdAt ?? session.user.created_at;
+  const displayEmail = account?.email ?? session.user.email ?? "未绑定邮箱";
+  const createdAt = account?.createdAt ?? session.user.created_at;
   const createdDate = createdAt ? new Date(createdAt).toLocaleDateString("zh-CN") : "未知";
 
   async function handleSignOut() {
@@ -43,7 +44,7 @@ export function ProfilePage({
     setError(null);
 
     try {
-      await supabase?.auth.signOut();
+      await supabase?.auth.signOut();
       onNavigate("/");
     } catch (signOutError) {
       setError(signOutError instanceof Error ? signOutError.message : "退出登录失败");
@@ -54,12 +55,12 @@ export function ProfilePage({
 
   return (
     <AuroraHero className="min-h-dvh">
-      <section className="min-h-dvh w-full pb-10 pt-24">
-        <div className="mx-auto grid w-[calc(100vw-32px)] max-w-[92rem] gap-y-5 sm:w-[calc(100vw-48px)] lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-x-20 xl:gap-x-28">
+      <section className={STUDIO_SECTION_CLASS}>
+        <div className={STUDIO_CONTENT_SHELL_CLASS}>
 
           <StudioSidebar account={account} active="profile" onNavigate={onNavigate} />
 
-          <div className="mx-auto w-full max-w-3xl justify-self-center">
+          <div className="mx-auto w-full min-w-0 max-w-3xl">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100">
@@ -131,15 +132,15 @@ export function ProfilePage({
                   管理员面板
                 </button>
               ) : null}
-              <button
+              <button
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
-                disabled={signingOut}
-                onClick={handleSignOut}
-                type="button"
-              >
-                {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                退出登录
-              </button>
+                  disabled={signingOut}
+                  onClick={handleSignOut}
+                  type="button"
+                >
+                  {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                  退出登录
+              </button>
             </div>
           </div>
           </div>

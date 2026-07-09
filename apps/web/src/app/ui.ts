@@ -1,4 +1,7 @@
 export const CONTENT_TRACK_CLASS = "mx-auto w-[calc(100vw-32px)] max-w-7xl sm:w-[calc(100vw-48px)]";
+export const STUDIO_SECTION_CLASS = "min-h-dvh w-full pb-10 pt-24 lg:pl-56";
+export const STUDIO_CONTENT_SHELL_CLASS =
+  "mx-auto grid w-[calc(100vw-32px)] max-w-[92rem] gap-y-5 sm:w-[calc(100vw-48px)] lg:w-[calc(100vw-14rem-48px)]";
 export const PRIMARY_CTA_BUTTON_CLASS =
   "border-white/20 !bg-black !text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:!bg-zinc-900";
 export const AUTH_TOGGLE_BUTTON_CLASS =

@@ -30,7 +30,12 @@ import { AuroraHero } from "@/components/ui/hero-2";
 import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { STUDIO_ADMIN_PATH } from "@/app/navigation";
-import { CONTENT_TRACK_CLASS, PRIMARY_CTA_BUTTON_CLASS } from "@/app/ui";
+import {
+  CONTENT_TRACK_CLASS,
+  PRIMARY_CTA_BUTTON_CLASS,
+  STUDIO_CONTENT_SHELL_CLASS,
+  STUDIO_SECTION_CLASS
+} from "@/app/ui";
 import {
   clampPercent,
   formatBytes,
@@ -43,12 +48,12 @@ import { LoadingScreen } from "@/app/feedback";
 import { cn } from "@/lib/utils";
 
 export function DashboardPage({
-  account,
+  account,
   authReady,
   onNavigate,
   session
 }: {
-  account: AccountProfile | null;
+  account: AccountProfile | null;
   authReady: boolean;
   onNavigate: (path: string) => void;
   session: Session | null;
@@ -312,7 +317,7 @@ export function DashboardPage({
     return <LoadingScreen label="正在读取账号" />;
   }
 
-  if (!session) {
+  if (!session) {
     return (
       <AuroraHero className="min-h-dvh">
         <section className={cn(CONTENT_TRACK_CLASS, "flex min-h-dvh items-center pt-20")}>
@@ -337,10 +342,10 @@ export function DashboardPage({
 
   return (
     <AuroraHero className="min-h-dvh">
-      <section className="min-h-dvh w-full pb-10 pt-24">
-        <div className="mx-auto grid w-[calc(100vw-32px)] max-w-[92rem] gap-y-5 sm:w-[calc(100vw-48px)] lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-x-20 xl:gap-x-28">
+      <section className={STUDIO_SECTION_CLASS}>
+        <div className={STUDIO_CONTENT_SHELL_CLASS}>
           <StudioSidebar account={account} active="create" onNavigate={onNavigate} />
-          <div className="mx-auto w-full max-w-5xl justify-self-center">
+          <div className="mx-auto w-full min-w-0 max-w-5xl">
             <div className="grid w-full gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="rounded-lg border border-white/10 bg-black p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
