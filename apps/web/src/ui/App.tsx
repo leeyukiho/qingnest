@@ -268,7 +268,7 @@ export function App() {
         className="min-h-dvh"
         exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 8, scale: 0.998 }}
         initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.996 }}
-        key={pathname}
+        key="studio"
         transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
       >
         {routeContent}
