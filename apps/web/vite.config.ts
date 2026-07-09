@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: webRoot,
+    envDir: repoRoot,
     plugins: [react()],
     resolve: {
       alias: {
