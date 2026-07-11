@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { ArrowDown, Check, Crown, Globe2, LogIn, ScanSearch, ShieldCheck, UploadCloud } from "lucide-react";
@@ -7,10 +7,12 @@ import { FloatingDock, type FloatingDockItem } from "@/components/ui/floating-do
 import { AuroraHero } from "@/components/ui/hero-2";
 import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
 import { SparklesCore } from "@/components/ui/sparkles";
+import { TextHoverEffect } from "@/components/ui/text-hover-effect";
 import { VanishingText } from "@/components/ui/vanishing-text";
 import { STUDIO_PATH } from "@/app/navigation";
 import { BRAND_LAYOUT_ID, CONTENT_TRACK_CLASS, HERO_VANISH_FALLBACK_MS, PRIMARY_CTA_BUTTON_CLASS } from "@/app/ui";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/lib/use-media-query";
 
 const pageVariants: Variants = {
   enter: (direction: number) => ({
@@ -148,30 +150,36 @@ function QingNestMark({
         layoutId={layoutId}
         transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
       >
-        <VanishingText
-          canvasClassName="h-full w-full"
-          className="block h-full w-full"
-          contentClassName="block h-full w-full"
-          drawOptions={qingNestVanishDrawOptions}
-          onComplete={onVanishComplete}
-          onNearComplete={onVanishComplete}
-          text="QingNest"
-          vanishing={vanishing}
-        />
+        {vanishing ? (
+          <VanishingText
+            canvasClassName="h-full w-full"
+            className="block h-full w-full"
+            contentClassName="block h-full w-full"
+            drawOptions={qingNestVanishDrawOptions}
+            onComplete={onVanishComplete}
+            onNearComplete={onVanishComplete}
+            text="QingNest"
+            vanishing
+          />
+        ) : (
+          <TextHoverEffect revealRadius={540} text="QingNest" />
+        )}
       </motion.div>
       <BrandSignal />
     </motion.div>
   );
 }
 
-function HeroScreen({
-  brandLayoutId,
-  onNext,
-  onStart
-}: {
-  brandLayoutId?: string;
-  onNext: () => void;
-  onStart: () => void;
+function HeroScreen({
+  brandLayoutId,
+  mobile = false,
+  onNext,
+  onStart
+}: {
+  brandLayoutId?: string;
+  mobile?: boolean;
+  onNext: () => void;
+  onStart: () => void;
 }) {
   const [isStarting, setIsStarting] = useState(false);
   const startTimeoutRef = useRef<number | null>(null);
@@ -211,12 +219,14 @@ function HeroScreen({
   }
 
   return (
-    <AuroraHero className="h-dvh min-h-dvh">
-      <section
-        className={cn(
-          CONTENT_TRACK_CLASS,
-          "relative flex h-dvh max-h-dvh flex-col items-center justify-center gap-5 overflow-hidden pb-20 pt-16 text-center sm:gap-6 md:pb-24 md:pt-16"
-        )}
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
+      <section
+        className={cn(
+          CONTENT_TRACK_CLASS,
+          mobile
+            ? "relative flex min-h-[100svh] flex-col items-center justify-center gap-5 overflow-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-[calc(4.5rem+env(safe-area-inset-top))] text-center"
+            : "relative flex h-dvh max-h-dvh flex-col items-center justify-center gap-5 overflow-hidden pb-20 pt-16 text-center sm:gap-6 md:pb-24 md:pt-16"
+        )}
         id="home"
       >
         <QingNestMark layoutId={brandLayoutId} onVanishComplete={handleVanishTextComplete} vanishing={isStarting} />
@@ -264,7 +274,10 @@ function HeroScreen({
 
         <motion.button
           animate={{ opacity: 1, y: 0 }}
-          className="absolute bottom-5 inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-zinc-400 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none sm:bottom-7 md:bottom-8"
+          className={cn(
+            "absolute inline-flex min-h-11 items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-zinc-400 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none",
+            mobile ? "bottom-[max(1.25rem,env(safe-area-inset-bottom))]" : "bottom-5 sm:bottom-7 md:bottom-8"
+          )}
           disabled={isStarting}
           initial={{ opacity: 0, y: 12 }}
           onClick={onNext}
@@ -279,7 +292,7 @@ function HeroScreen({
   );
 }
 
-function StepsScreen() {
+function StepsScreen({ mobile = false }: { mobile?: boolean }) {
   const [activeStep, setActiveStep] = useState(0);
   const dockItems: FloatingDockItem[] = steps.map((step, index) => {
     const Icon = step.icon;
@@ -293,11 +306,13 @@ function StepsScreen() {
   });
 
   return (
-    <AuroraHero className="h-dvh min-h-dvh">
-      <section
-        className={cn(
-          CONTENT_TRACK_CLASS,
-          "flex h-dvh max-h-dvh flex-col justify-center gap-4 overflow-hidden pb-7 pt-24 sm:gap-6 md:gap-7 md:pt-24"
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
+      <section
+        className={cn(
+          CONTENT_TRACK_CLASS,
+          mobile
+            ? "flex min-h-[100svh] flex-col justify-start gap-4 overflow-visible pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(5rem+env(safe-area-inset-top))]"
+            : "flex h-dvh max-h-dvh flex-col justify-center gap-4 overflow-hidden pb-7 pt-24 sm:gap-6 md:gap-7 md:pt-24"
         )}
         id="steps"
       >
@@ -332,7 +347,7 @@ function StepsScreen() {
             return (
               <motion.article
                 className={cn(
-                  "glass-surface flex min-h-[8.5rem] flex-col items-center justify-center gap-3 rounded-lg p-4 text-center outline-none transition-colors duration-300 md:min-h-56 md:justify-between md:gap-4 md:p-6",
+                  "glass-surface flex min-h-[6.5rem] flex-row items-center justify-start gap-3 rounded-lg p-3 text-left outline-none transition-colors duration-300 md:min-h-56 md:flex-col md:items-center md:justify-between md:gap-4 md:p-6 md:text-center",
                   isActive ? "is-active border-white/20" : null
                 )}
                 key={step.title}
@@ -341,7 +356,7 @@ function StepsScreen() {
                 tabIndex={0}
                 whileHover={{ y: -6 }}
               >
-                <div className="relative flex w-full items-center justify-center">
+                <div className="relative flex w-auto shrink-0 items-center justify-center md:w-full">
                   <span
                     className={cn(
                       "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border md:h-12 md:w-12",
@@ -354,8 +369,8 @@ function StepsScreen() {
                     0{index + 1}
                   </span>
                 </div>
-                <div className="min-w-0 md:flex-none">
-                  <div className="mb-1 flex items-center justify-center gap-2 md:hidden">
+                <div className="min-w-0 flex-1 md:flex-none">
+                  <div className="mb-1 flex items-center justify-start gap-2 md:hidden">
                     <span className="text-xs font-semibold text-zinc-500">0{index + 1}</span>
                     {isActive ? (
                       <Check
@@ -381,13 +396,15 @@ function StepsScreen() {
   );
 }
 
-function PricingScreen({ onStart }: { onStart: () => void }) {
+function PricingScreen({ mobile = false, onStart }: { mobile?: boolean; onStart: () => void }) {
   return (
-    <AuroraHero className="h-dvh min-h-dvh">
-      <section
-        className={cn(
-          CONTENT_TRACK_CLASS,
-          "flex h-dvh max-h-dvh flex-col justify-start gap-4 overflow-y-auto pb-6 pt-24 sm:gap-5 md:justify-center md:gap-7 md:pt-24"
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
+      <section
+        className={cn(
+          CONTENT_TRACK_CLASS,
+          mobile
+            ? "flex min-h-[100svh] flex-col justify-start gap-4 overflow-visible pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(5rem+env(safe-area-inset-top))]"
+            : "flex h-dvh max-h-dvh flex-col justify-start gap-4 overflow-y-auto pb-6 pt-24 sm:gap-5 md:justify-center md:gap-7 md:pt-24"
         )}
         id="pricing"
       >
@@ -470,6 +487,93 @@ function PricingScreen({ onStart }: { onStart: () => void }) {
   );
 }
 
+type HomePageProps = {
+  direction: number;
+  isHomeRoute: boolean;
+  onGoToPage: (page: number) => void;
+  onNavigate: (path: string) => void;
+  page: number;
+  session: Session | null;
+};
+
+function MobileHomePage({
+  onGoToPage,
+  onNavigate,
+  page,
+  session
+}: Omit<HomePageProps, "direction" | "isHomeRoute">) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const visiblePageRef = useRef(-1);
+  const startPath = session ? STUDIO_PATH : "/auth?mode=sign_up";
+
+  const scrollToPage = useCallback(
+    (nextPage: number, behavior: ScrollBehavior = "smooth") => {
+      const container = scrollContainerRef.current;
+      const section = container?.querySelector<HTMLElement>(`[data-home-page="${nextPage}"]`);
+
+      if (!container || !section) return;
+
+      container.scrollTo({ behavior, top: section.offsetTop });
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    const section = container?.querySelector<HTMLElement>(`[data-home-page="${page}"]`);
+
+    if (!container || !section || visiblePageRef.current === page) return;
+
+    visiblePageRef.current = page;
+    container.scrollTo({ behavior: "auto", top: section.offsetTop });
+  }, [page]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const sections = Array.from(container.querySelectorAll<HTMLElement>("[data-home-page]"));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const centeredEntry = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((first, second) => second.intersectionRatio - first.intersectionRatio)[0];
+        const nextPage = Number((centeredEntry?.target as HTMLElement | undefined)?.dataset.homePage);
+
+        if (!Number.isInteger(nextPage) || visiblePageRef.current === nextPage) return;
+
+        visiblePageRef.current = nextPage;
+        onGoToPage(nextPage);
+      },
+      {
+        root: container,
+        rootMargin: "-42% 0px -42% 0px",
+        threshold: 0
+      }
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [onGoToPage]);
+
+  return (
+    <div
+      className="absolute inset-0 h-dvh w-screen touch-pan-y snap-y snap-proximity overflow-x-hidden overflow-y-auto overscroll-y-contain scroll-smooth"
+      ref={scrollContainerRef}
+    >
+      <div className="snap-start" data-home-page="0">
+        <HeroScreen mobile onNext={() => scrollToPage(1)} onStart={() => onNavigate(startPath)} />
+      </div>
+      <div className="snap-start" data-home-page="1">
+        <StepsScreen mobile />
+      </div>
+      <div className="snap-start" data-home-page="2">
+        <PricingScreen mobile onStart={() => onNavigate(startPath)} />
+      </div>
+    </div>
+  );
+}
+
 export function HomePage({
   direction,
   isHomeRoute,
@@ -477,14 +581,20 @@ export function HomePage({
   onNavigate,
   page,
   session
-}: {
-  direction: number;
-  isHomeRoute: boolean;
-  onGoToPage: (page: number) => void;
-  onNavigate: (path: string) => void;
-  page: number;
-  session: Session | null;
-}) {
+}: HomePageProps) {
+  const isMobileViewport = useMediaQuery("(max-width: 767px), (hover: none) and (pointer: coarse)");
+
+  if (isMobileViewport) {
+    return (
+      <MobileHomePage
+        onGoToPage={onGoToPage}
+        onNavigate={onNavigate}
+        page={page}
+        session={session}
+      />
+    );
+  }
+
   return (
     <AnimatePresence custom={direction} initial={false} mode="wait">
       <motion.div

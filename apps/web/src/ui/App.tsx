@@ -25,6 +25,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { HomePage } from "@/pages/HomePage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/lib/use-media-query";
 
 export function App() {
   const [location, setLocation] = useState(getBrowserLocation);
@@ -36,6 +37,7 @@ export function App() {
   const [authReady, setAuthReady] = useState(false);
   const wheelLockRef = useRef(false);
   const shouldReduceMotion = useReducedMotion();
+  const isMobileViewport = useMediaQuery("(max-width: 767px), (hover: none) and (pointer: coarse)");
 
   const pathname = location.pathname;
   const isHomeRoute = isHomePathname(pathname);
@@ -107,7 +109,7 @@ export function App() {
   }, [isHomeRoute, location.hash, page]);
 
   useEffect(() => {
-    if (!isHomeRoute) return;
+    if (!isHomeRoute || isMobileViewport) return;
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -126,7 +128,7 @@ export function App() {
 
     window.addEventListener("wheel", handleWheel, { passive: false });
     return () => window.removeEventListener("wheel", handleWheel);
-  }, [goToPage, isHomeRoute, page]);
+  }, [goToPage, isHomeRoute, isMobileViewport, page]);
 
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured) {

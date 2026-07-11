@@ -182,6 +182,18 @@ a {
   }
 }
 
+@media (max-width: 767px) {
+  .qingnest-text-fill {
+    opacity: 0.16;
+    filter: drop-shadow(0 0 3px rgba(103, 232, 249, 0.14));
+  }
+
+  .qingnest-text-stroke {
+    opacity: 0.9;
+    stroke-width: 1.2px;
+  }
+}
+
 .cover-warp {
   border-radius: 9999px;
   color: inherit;

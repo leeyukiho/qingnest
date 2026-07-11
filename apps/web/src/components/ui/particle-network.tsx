@@ -73,7 +73,7 @@ const getGlyphPointerConnectionRadius = (canvasWidth: number) => (canvasWidth < 
 const getTextPriorityPadding = (layout: TextLayout) => Math.max(28, Math.min(72, layout.fontSize * 0.28));
 const getTextClearPadding = (layout: TextLayout) => Math.max(14, Math.min(36, layout.fontSize * 0.16));
 const getTextClearBottomPadding = (layout: TextLayout) => Math.max(28, Math.min(78, layout.fontSize * 0.44));
-const getCanvasPixelRatio = () => Math.min(window.devicePixelRatio || 1, 1.5);
+const getCanvasPixelRatio = () => Math.min(window.devicePixelRatio || 1, 2);
 
 const isInsideBounds = (x: number, y: number, bounds: Bounds, padding = 0) =>
   x >= bounds.left - padding &&
@@ -200,6 +200,7 @@ export function ParticleNetwork({
     if (!context) return;
 
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const hasCoarsePointer = window.matchMedia("(hover: none), (pointer: coarse)").matches;
     const pointer = {
       active: false,
       inEmphasisTarget: false,
@@ -218,6 +219,8 @@ export function ParticleNetwork({
     let height = 0;
     let hoverPresence = 0;
     let isDocumentVisible = document.visibilityState !== "hidden";
+    let isInViewport = true;
+    let isTouching = false;
     let lastFrameAt = 0;
     let lastLayoutRefreshAt = 0;
     let layoutBounds: Bounds | null = null;
@@ -518,7 +521,7 @@ export function ParticleNetwork({
           : false;
     };
 
-    const handlePointerMove = (event: PointerEvent) => {
+    const updatePointerPosition = (event: PointerEvent) => {
       refreshLayout(performance.now());
 
       const rect = canvas.getBoundingClientRect();
@@ -541,6 +544,26 @@ export function ParticleNetwork({
       }
     };
 
+    const handlePointerMove = (event: PointerEvent) => {
+      if (hasCoarsePointer && !isTouching) return;
+      updatePointerPosition(event);
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch" && !hasCoarsePointer) return;
+      isTouching = true;
+      updatePointerPosition(event);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (!hasCoarsePointer && event.pointerType !== "touch") return;
+      isTouching = false;
+      pointer.active = false;
+      pointer.inEmphasisTarget = false;
+      pointer.nearEmphasisTarget = false;
+      queueFrame();
+    };
+
     const handlePointerLeave = () => {
       pointer.active = false;
       pointer.inEmphasisTarget = false;
@@ -552,7 +575,7 @@ export function ParticleNetwork({
     };
 
     function queueFrame() {
-      if (animationFrame || !isDocumentVisible) return;
+      if (animationFrame || !isDocumentVisible || !isInViewport) return;
 
       animationFrame = window.requestAnimationFrame(draw);
     }
@@ -608,6 +631,14 @@ export function ParticleNetwork({
       refreshLayout(timestamp);
 
       const textLayout = layoutText;
+      if (hasCoarsePointer && !isTouching && !prefersReducedMotion) {
+        const travelX = Math.max(width * 0.24, 72);
+        const travelY = Math.max(height * 0.16, 52);
+        pointer.x = width / 2 + Math.sin(timestamp / 2600) * travelX;
+        pointer.y = height / 2 + Math.cos(timestamp / 3300) * travelY;
+        pointer.active = true;
+      }
+
       pointer.inEmphasisTarget =
         pointer.active && textLayout ? isInsideBounds(pointer.x, pointer.y, textLayout, 2) : false;
       pointer.nearEmphasisTarget =
@@ -666,7 +697,7 @@ export function ParticleNetwork({
             ? clamp01(1 - pointerDistance / pointerFocusRadius) * hoverPresence
             : 0;
           const focusBoost = pointerFocus * 0.2;
-          const alpha = 0.02 * Math.pow(proximity, 1.56);
+          const alpha = (hasCoarsePointer ? 0.038 : 0.02) * Math.pow(proximity, 1.56);
 
           if (alpha < 0.008) return;
 
@@ -678,7 +709,7 @@ export function ParticleNetwork({
           context.lineTo(nextParticle.x, nextParticle.y);
           context.strokeStyle = `rgba(${lineColor[0]}, ${lineColor[1]}, ${lineColor[2]}, ${alpha})`;
           context.lineWidth =
-            0.36 + proximity * 0.22 + focusBoost * 0.42 + pointerFocus * 0.08;
+            (hasCoarsePointer ? 0.62 : 0.36) + proximity * 0.22 + focusBoost * 0.42 + pointerFocus * 0.08;
           context.shadowBlur = focusBoost > 0.03 || pointerFocus > 0.08
             ? 0.4 + focusBoost * 2.8 + pointerFocus * 0.55
             : 0;
@@ -842,7 +873,26 @@ export function ParticleNetwork({
 
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        isInViewport = entry.isIntersecting;
+
+        if (!isInViewport) {
+          window.cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+          return;
+        }
+
+        lastFrameAt = 0;
+        resize();
+      },
+      { rootMargin: "80px" }
+    );
+    visibilityObserver.observe(canvas);
     window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerdown", handlePointerDown, { passive: true });
+    window.addEventListener("pointerup", handlePointerUp, { passive: true });
+    window.addEventListener("pointercancel", handlePointerUp, { passive: true });
     window.addEventListener("pointerleave", handlePointerLeave);
     window.addEventListener("blur", handlePointerLeave);
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -850,7 +900,11 @@ export function ParticleNetwork({
     return () => {
       window.cancelAnimationFrame(animationFrame);
       observer.disconnect();
+      visibilityObserver.disconnect();
       window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
       window.removeEventListener("pointerleave", handlePointerLeave);
       window.removeEventListener("blur", handlePointerLeave);
       document.removeEventListener("visibilitychange", handleVisibilityChange);

@@ -22,7 +22,7 @@ interface Particle {
 const MAX_PARTICLES = 320;
 const MIN_PARTICLES = 48;
 const TARGET_FRAME_INTERVAL = 1000 / 36;
-const getCanvasPixelRatio = () => Math.min(window.devicePixelRatio || 1, 1.35);
+const getCanvasPixelRatio = () => Math.min(window.devicePixelRatio || 1, 2);
 
 export function SparklesCore({
   background = "transparent",
@@ -45,6 +45,7 @@ export function SparklesCore({
     const colorFormatter = createColorFormatter(particleColor);
     let animationFrame = 0;
     let isDocumentVisible = document.visibilityState !== "hidden";
+    let isInViewport = true;
     let lastFrameAt = 0;
     let particles: Particle[] = [];
     let width = 0;
@@ -79,7 +80,7 @@ export function SparklesCore({
     };
 
     function queueFrame() {
-      if (animationFrame || !isDocumentVisible) return;
+      if (animationFrame || !isDocumentVisible || !isInViewport) return;
 
       animationFrame = window.requestAnimationFrame(draw);
     }
@@ -145,11 +146,28 @@ export function SparklesCore({
 
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        isInViewport = entry.isIntersecting;
+
+        if (!isInViewport) {
+          window.cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+          return;
+        }
+
+        lastFrameAt = 0;
+        resize();
+      },
+      { rootMargin: "80px" }
+    );
+    visibilityObserver.observe(canvas);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
       observer.disconnect();
+      visibilityObserver.disconnect();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [background, maxSize, minSize, particleColor, particleDensity]);

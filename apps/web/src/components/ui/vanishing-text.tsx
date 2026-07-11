@@ -39,9 +39,9 @@ type VanishingTextProps = {
   vanishing: boolean;
 };
 
-const CANVAS_SCALE = 1;
 const VANISH_STEP = 8;
 const PARTICLE_FADE_RATE = 0.05;
+const getCanvasScale = () => Math.min(window.devicePixelRatio || 1, 2);
 
 function parseLineHeight(lineHeight: string, fontSize: number) {
   const parsed = Number.parseFloat(lineHeight);
@@ -103,6 +103,7 @@ export function VanishingText({
   const nearCompletedRef = useRef(false);
   const particlesRef = useRef<Particle[]>([]);
   const completedRef = useRef(false);
+  const canvasScaleRef = useRef(1);
   const complete = useCallback(() => {
     if (!completedRef.current) {
       completedRef.current = true;
@@ -124,8 +125,9 @@ export function VanishingText({
     if (!canvas || !content) return 0;
 
     const rect = content.getBoundingClientRect();
-    const width = Math.max(1, Math.ceil(rect.width * CANVAS_SCALE));
-    const height = Math.max(1, Math.ceil(rect.height * CANVAS_SCALE));
+    const canvasScale = getCanvasScale();
+    const width = Math.max(1, Math.ceil(rect.width * canvasScale));
+    const height = Math.max(1, Math.ceil(rect.height * canvasScale));
     const context = canvas.getContext("2d");
 
     if (!context) return 0;
@@ -134,17 +136,18 @@ export function VanishingText({
     canvas.height = height;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
+    canvasScaleRef.current = canvasScale;
 
     const styles = window.getComputedStyle(content);
     const resolvedFontSize =
       typeof drawOptions?.fontSize === "function"
         ? drawOptions.fontSize(rect.width, rect.height)
         : (drawOptions?.fontSize ?? Number.parseFloat(styles.fontSize)) || 16;
-    const fontSize = resolvedFontSize * CANVAS_SCALE;
+    const fontSize = resolvedFontSize * canvasScale;
     const lineHeight =
       (typeof drawOptions?.lineHeight === "function"
         ? drawOptions.lineHeight(resolvedFontSize)
-        : (drawOptions?.lineHeight ?? parseLineHeight(styles.lineHeight, resolvedFontSize))) * CANVAS_SCALE;
+        : (drawOptions?.lineHeight ?? parseLineHeight(styles.lineHeight, resolvedFontSize))) * canvasScale;
     const fontFamily = drawOptions?.fontFamily ?? styles.fontFamily;
     const fontWeight = drawOptions?.fontWeight ?? styles.fontWeight;
     const fontStyle = styles.fontStyle === "normal" ? "" : `${styles.fontStyle} `;
@@ -181,7 +184,7 @@ export function VanishingText({
 
     if (strokeWidth > 0 && strokeOpacity > 0) {
       context.globalAlpha = strokeOpacity;
-      context.lineWidth = strokeWidth * CANVAS_SCALE;
+      context.lineWidth = strokeWidth * canvasScale;
       context.strokeStyle = strokeStyle;
 
       lines.forEach((line, index) => {
@@ -200,8 +203,10 @@ export function VanishingText({
     const particles: Particle[] = [];
     let maxX = 0;
 
-    for (let y = 0; y < height; y += 1) {
-      for (let xIndex = 0; xIndex < width; xIndex += 1) {
+    const sampleStep = canvasScale >= 1.5 ? 2 : 1;
+
+    for (let y = 0; y < height; y += sampleStep) {
+      for (let xIndex = 0; xIndex < width; xIndex += sampleStep) {
         const pixelIndex = 4 * (y * width + xIndex);
         const alpha = imageData[pixelIndex + 3];
 
@@ -209,7 +214,7 @@ export function VanishingText({
           maxX = Math.max(maxX, xIndex);
           particles.push({
             color: [imageData[pixelIndex], imageData[pixelIndex + 1], imageData[pixelIndex + 2], alpha / 255],
-            r: 1,
+            r: sampleStep,
             x: xIndex,
             y
           });
@@ -241,9 +246,10 @@ export function VanishingText({
           } else {
             if (particle.r <= 0) continue;
 
-            particle.x += Math.random() > 0.5 ? 1 : -1;
-            particle.y += Math.random() > 0.5 ? 1 : -1;
-            particle.r -= PARTICLE_FADE_RATE * Math.random();
+            const canvasScale = canvasScaleRef.current;
+            particle.x += (Math.random() > 0.5 ? 1 : -1) * canvasScale;
+            particle.y += (Math.random() > 0.5 ? 1 : -1) * canvasScale;
+            particle.r -= PARTICLE_FADE_RATE * canvasScale * Math.random();
             nextParticles.push(particle);
           }
         }
@@ -265,7 +271,7 @@ export function VanishingText({
         }
 
         if (particlesRef.current.length > 0) {
-          animate(position - VANISH_STEP);
+          animate(position - VANISH_STEP * canvasScaleRef.current);
         } else {
           context.clearRect(0, 0, canvas.width, canvas.height);
           nearComplete();
