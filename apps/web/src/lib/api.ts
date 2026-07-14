@@ -183,7 +183,17 @@ export type AdminOverview = {
   activeSites: number;
   pendingReviewSites: number;
   deployments: number;
+  domains: number;
+  blockedSites: number;
+  storageBytes: number;
+  recentUsers: Array<{ id: string; email: string; role: AccountRole; plan: string; createdAt: string }>;
+  recentSites: Array<{ id: string; name: string; ownerEmail: string; status: "draft" | "active" | "pending_review" | "blocked" | "deleted"; createdAt: string; updatedAt: string }>;
+  reviewDeployments: Array<{ id: string; siteId: string; siteName: string; version: number; status: DeploymentSummary["status"]; riskScore: number; fileCount: number; totalBytes: number; createdAt: string }>;
+  auditEvents: Array<{ id: string; eventType: string; message: string; riskScore: number; createdAt: string }>;
 };
+
+const ADMIN_OVERVIEW_CACHE_MS = 30_000;
+let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
 
 export type SignUpConfirmationResult = {
   email: string;
@@ -211,8 +221,25 @@ export async function getCurrentAccount() {
   return request<AccountProfile>("/api/me");
 }
 
-export async function getAdminOverview() {
-  return request<AdminOverview>("/api/admin/overview");
+export async function getAdminOverview(force = false) {
+  if (!force && adminOverviewCache && adminOverviewCache.expiresAt > Date.now()) {
+    return adminOverviewCache.data;
+  }
+  const data = await request<AdminOverview>("/api/admin/overview");
+  adminOverviewCache = { data, expiresAt: Date.now() + ADMIN_OVERVIEW_CACHE_MS };
+  return data;
+}
+
+export async function updateAdminUser(userId: string, input: { role?: AccountRole; plan?: string }) {
+  const result = await request<AdminOverview["recentUsers"][number]>(`/api/admin/users/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify(input) });
+  adminOverviewCache = null;
+  return result;
+}
+
+export async function updateAdminSite(siteId: string, status: "draft" | "active" | "pending_review" | "blocked") {
+  const result = await request<{ id: string; name: string; status: string }>(`/api/admin/sites/${encodeURIComponent(siteId)}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  adminOverviewCache = null;
+  return result;
 }
 
 export async function checkSubdomain(subdomain: string) {

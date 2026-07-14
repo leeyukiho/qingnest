@@ -23,6 +23,8 @@ import {
   listPublicSlots,
   rentPublicSlot,
   switchPublicSlot,
+  updateAdminSite,
+  updateAdminUser,
   updateProjectName,
   signUpWithEmailPassword,
 } from "./state";
@@ -49,6 +51,9 @@ type SignUpInput = {
   password?: string;
   redirectTo?: string;
 };
+
+type AdminUserUpdateInput = { role?: "user" | "admin"; plan?: string };
+type AdminSiteUpdateInput = { status?: "draft" | "active" | "pending_review" | "blocked" };
 
 const subdomainCheckWindows = new Map<
   string,
@@ -171,6 +176,23 @@ export async function handleApi(request: Request, env: Env) {
       }
 
       return json(await getAdminOverview(env, user));
+    }
+
+    const adminUserMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+    if (request.method === "PATCH" && adminUserMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<AdminUserUpdateInput>(request);
+      return json(await updateAdminUser(env, user, { userId: decodeURIComponent(adminUserMatch[1] ?? ""), ...input }));
+    }
+
+    const adminSiteMatch = url.pathname.match(/^\/api\/admin\/sites\/([^/]+)$/);
+    if (request.method === "PATCH" && adminSiteMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<AdminSiteUpdateInput>(request);
+      if (!input.status) return problem("请选择站点状态", 400);
+      return json(await updateAdminSite(env, user, { siteId: decodeURIComponent(adminSiteMatch[1] ?? ""), status: input.status }));
     }
 
     if (request.method === "GET" && url.pathname === "/api/subdomains/check") {

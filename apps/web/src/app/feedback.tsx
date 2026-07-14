@@ -83,3 +83,22 @@ export function StudioLoading({
     </div>
   );
 }
+
+export function StudioSilentGate({
+  account,
+  onNavigate
+}: {
+  account: AccountProfile | null;
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <div className="min-h-dvh bg-black">
+      <section className={STUDIO_SECTION_CLASS}>
+        <div className={STUDIO_CONTENT_SHELL_CLASS}>
+          <StudioSidebar account={account} active="create" onNavigate={onNavigate} />
+          <div className={`${STUDIO_MAIN_CLASS} min-h-[55vh]`} aria-hidden="true" />
+        </div>
+      </section>
+    </div>
+  );
+}

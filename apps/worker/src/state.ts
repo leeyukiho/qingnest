@@ -23,7 +23,7 @@ import {
   hasAuthSupabase,
   hasServiceSupabase,
 } from "./supabase";
-import type { ProfileRole } from "./supabase";
+import type { Database, ProfileRole } from "./supabase";
 import type { DomainMapping, Env } from "./types";
 
 type DraftSite = {
@@ -115,6 +115,42 @@ export type AdminOverview = {
   activeSites: number;
   pendingReviewSites: number;
   deployments: number;
+  domains: number;
+  blockedSites: number;
+  storageBytes: number;
+  recentUsers: Array<{
+    id: string;
+    email: string;
+    role: ProfileRole;
+    plan: string;
+    createdAt: string;
+  }>;
+  recentSites: Array<{
+    id: string;
+    name: string;
+    ownerEmail: string;
+    status: Database["public"]["Tables"]["sites"]["Row"]["status"];
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  reviewDeployments: Array<{
+    id: string;
+    siteId: string;
+    siteName: string;
+    version: number;
+    status: Database["public"]["Tables"]["deployments"]["Row"]["status"];
+    riskScore: number;
+    fileCount: number;
+    totalBytes: number;
+    createdAt: string;
+  }>;
+  auditEvents: Array<{
+    id: string;
+    eventType: string;
+    message: string;
+    riskScore: number;
+    createdAt: string;
+  }>;
 };
 
 export type SignUpConfirmationResult = {
@@ -886,54 +922,51 @@ export async function getAdminOverview(
   env: Env,
   user: AuthenticatedUser,
 ): Promise<AdminOverview> {
-  const account = await getAccountProfile(env, user);
-
-  if (account.role !== "admin") {
-    throw new Error("需要管理员权限");
-  }
-
   const supabase = createServiceSupabase(env);
-  const [
-    { count: users, error: usersError },
-    { count: sites, error: sitesError },
-    { count: activeSites, error: activeSitesError },
-    { count: pendingReviewSites, error: pendingReviewSitesError },
-    { count: deployments, error: deploymentsError },
-  ] = await Promise.all([
-    supabase.from("profiles").select("id", { count: "exact", head: true }),
-    supabase
-      .from("sites")
-      .select("id", { count: "exact", head: true })
-      .neq("status", "deleted"),
-    supabase
-      .from("sites")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "active"),
-    supabase
-      .from("sites")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "pending_review"),
-    supabase.from("deployments").select("id", { count: "exact", head: true }),
-  ]);
+  const { data, error } = await supabase.rpc("get_admin_overview", {
+    p_admin_id: user.id,
+  });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("无法读取管理员数据");
+  return data as unknown as AdminOverview;
+}
 
-  const error =
-    usersError ??
-    sitesError ??
-    activeSitesError ??
-    pendingReviewSitesError ??
-    deploymentsError;
+async function requireAdmin(env: Env, user: AuthenticatedUser) {
+  const account = await getAccountProfile(env, user);
+  if (account.role !== "admin") throw new Error("需要管理员权限");
+  return createServiceSupabase(env);
+}
 
-  if (error) {
-    throw new Error(error.message);
+export async function updateAdminUser(env: Env, user: AuthenticatedUser, input: { userId: string; role?: ProfileRole; plan?: string }) {
+  const supabase = await requireAdmin(env, user);
+  if (input.userId === user.id && input.role && input.role !== "admin") throw new Error("不能移除自己的管理员权限");
+  const update: Database["public"]["Tables"]["profiles"]["Update"] = {};
+  if (input.role) update.role = input.role;
+  if (input.plan) update.plan = input.plan.trim().slice(0, 40);
+  if (!Object.keys(update).length) throw new Error("没有可更新的字段");
+  const { data, error } = await supabase.from("profiles").update(update).eq("id", input.userId).select("id, email, role, plan, created_at").single();
+  if (error) throw new Error(error.message);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.user.updated", message: `管理员更新用户 ${data.email}：${data.role}/${data.plan}` });
+  return { id: data.id, email: data.email, role: data.role, plan: data.plan, createdAt: data.created_at };
+}
+
+export async function updateAdminSite(env: Env, user: AuthenticatedUser, input: { siteId: string; status: "draft" | "active" | "pending_review" | "blocked" }) {
+  const supabase = await requireAdmin(env, user);
+  const { data, error } = await supabase.from("sites").update({ status: input.status, updated_at: new Date().toISOString() }).eq("id", input.siteId).neq("status", "deleted").select("id, name, status, active_deployment_id").single();
+  if (error) throw new Error(error.message);
+  const { data: domains } = await supabase.from("domains").select("hostname").eq("site_id", input.siteId).neq("status", "deleted");
+  if (input.status === "blocked") {
+    await supabase.from("domains").update({ status: "blocked" }).eq("site_id", input.siteId).neq("status", "deleted");
+    await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname)));
+  } else if ((input.status === "active" || input.status === "pending_review") && data.active_deployment_id) {
+    const domainStatus = input.status === "active" ? "active" : "pending_review";
+    await supabase.from("domains").update({ status: domainStatus }).eq("site_id", input.siteId).neq("status", "deleted");
+    const { data: deployment, error: deploymentError } = await supabase.from("deployments").select("id, r2_prefix, spa_fallback_enabled").eq("id", data.active_deployment_id).single();
+    if (deploymentError) throw new Error(deploymentError.message);
+    await Promise.all((domains ?? []).map((domain) => cachePublicSlot(env, { hostname: domain.hostname, status: domainStatus }, input.siteId, deployment)));
   }
-
-  return {
-    users: users ?? 0,
-    sites: sites ?? 0,
-    activeSites: activeSites ?? 0,
-    pendingReviewSites: pendingReviewSites ?? 0,
-    deployments: deployments ?? 0,
-  };
+  await supabase.from("audit_events").insert({ user_id: user.id, site_id: input.siteId, event_type: "admin.site.status_updated", message: `管理员将站点 ${data.name} 调整为 ${input.status}` });
+  return { id: data.id, name: data.name, status: data.status };
 }
 
 async function getUserPlan(env: Env, user: AuthenticatedUser) {

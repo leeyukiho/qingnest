@@ -22,7 +22,7 @@ import {
   STUDIO_PROJECTS_PATH,
   STUDIO_PROFILE_PATH
 } from "@/app/navigation";
-import { StudioLoading } from "@/app/feedback";
+import { StudioLoading, StudioSilentGate } from "@/app/feedback";
 import { AdminPage } from "@/pages/AdminPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -37,6 +37,17 @@ import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { ToastProvider } from "@/app/toast";
 
+const SIDEBAR_ACCOUNT_CACHE_KEY = "kuaipage:sidebar-account";
+
+function getCachedSidebarAccount() {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(window.sessionStorage.getItem(SIDEBAR_ACCOUNT_CACHE_KEY) ?? "null") as AccountProfile | null;
+  } catch {
+    return null;
+  }
+}
+
 export function App() {
   const [location, setLocation] = useState(getBrowserLocation);
   const [page, setPage] = useState(getInitialPage);
@@ -44,6 +55,7 @@ export function App() {
   const [animateBrand, setAnimateBrand] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [account, setAccount] = useState<AccountProfile | null>(null);
+  const [cachedSidebarAccount, setCachedSidebarAccount] = useState<AccountProfile | null>(getCachedSidebarAccount);
   const [authReady, setAuthReady] = useState(false);
   const wheelLockRef = useRef(false);
   const accountRefreshedAtRef = useRef(0);
@@ -52,11 +64,27 @@ export function App() {
 
   const pathname = location.pathname;
   const isHomeRoute = isHomePathname(pathname);
-  const isLegacyProtectedRoute = pathname === "/app" || pathname === "/profile" || pathname === "/admin";
+  const isLegacyProtectedRoute = pathname === "/app" || pathname === "/profile" || pathname === "/studio/admin";
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
   const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
+  const matchingCachedAccount = session && cachedSidebarAccount?.id === session.user.id ? cachedSidebarAccount : null;
+  const silentGateAccount = account ?? matchingCachedAccount ?? (session ? {
+    id: session.user.id,
+    email: session.user.email ?? "",
+    emailConfirmed: isSessionEmailConfirmed(session),
+    role: "user" as const,
+    plan: "free",
+    createdAt: session.user.created_at ?? new Date().toISOString(),
+    usage: { sites: 0, publicSites: 0, storageBytes: 0, deploymentsToday: 0 }
+  } : null);
+
+  useEffect(() => {
+    if (!account) return;
+    setCachedSidebarAccount(account);
+    window.sessionStorage.setItem(SIDEBAR_ACCOUNT_CACHE_KEY, JSON.stringify(account));
+  }, [account]);
 
   const navigate = useCallback((path: string, options: { replace?: boolean } = {}) => {
     if (typeof window === "undefined") return;
@@ -167,7 +195,11 @@ export function App() {
       data: { subscription }
     } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
-      if (!nextSession) setAccount(null);
+      if (!nextSession) {
+        setAccount(null);
+        setCachedSidebarAccount(null);
+        window.sessionStorage.removeItem(SIDEBAR_ACCOUNT_CACHE_KEY);
+      }
     });
 
     return () => {
@@ -270,7 +302,7 @@ export function App() {
       navigate(STUDIO_PATH, { replace: true });
     } else if (pathname === "/profile") {
       navigate(STUDIO_PROFILE_PATH, { replace: true });
-    } else if (pathname === "/admin") {
+    } else if (pathname === "/studio/admin") {
       navigate(STUDIO_ADMIN_PATH, { replace: true });
     }
   }, [navigate, pathname]);
@@ -280,6 +312,12 @@ export function App() {
 
     navigate("/auth?mode=sign_in", { replace: true });
   }, [authReady, isProtectedRoute, navigate, session]);
+
+  useEffect(() => {
+    if (pathname !== STUDIO_ADMIN_PATH || !account || account.role === "admin") return;
+
+    navigate(STUDIO_PATH, { replace: true });
+  }, [account, navigate, pathname]);
 
   let routeContent: ReactNode;
 
@@ -311,8 +349,10 @@ export function App() {
     routeContent = <ProjectDetailPage account={account} authReady={authReady} onNavigate={navigate} session={session} siteId={siteId} />;
   } else if (pathname === STUDIO_PROFILE_PATH || pathname === "/profile") {
     routeContent = <ProfilePage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
-  } else if (pathname === STUDIO_ADMIN_PATH || pathname === "/admin") {
+  } else if (pathname === STUDIO_ADMIN_PATH && account?.role === "admin") {
     routeContent = <AdminPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
+  } else if (pathname === STUDIO_ADMIN_PATH) {
+    routeContent = <StudioSilentGate account={silentGateAccount} onNavigate={navigate} />;
   } else {
     routeContent = <DashboardPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   }

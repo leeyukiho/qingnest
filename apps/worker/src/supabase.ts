@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Env } from "./types";
 
 type EmptyRelationships = [];
+type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 export type ProfileRole = "user" | "admin";
 
 export type Database = {
@@ -241,6 +242,10 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      get_admin_overview: {
+        Args: { p_admin_id: string };
+        Returns: Json;
+      };
       claim_signup_confirmation_email: {
         Args: {
           p_email: string;

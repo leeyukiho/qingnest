@@ -1,4 +1,4 @@
 /app /studio 301
 /profile /studio/profile 301
-/admin /studio/admin 301
+/studio/admin /admin 301
 /* /index.html 200

@@ -6,7 +6,7 @@ export const STUDIO_DOMAINS_PATH = `${STUDIO_PATH}/domains`;
 export const STUDIO_DOMAIN_PURCHASE_PATH = `${STUDIO_DOMAINS_PATH}/purchase`;
 export const STUDIO_BILLING_PATH = `${STUDIO_PATH}/billing`;
 export const STUDIO_PROFILE_PATH = `${STUDIO_PATH}/profile`;
-export const STUDIO_ADMIN_PATH = `${STUDIO_PATH}/admin`;
+export const STUDIO_ADMIN_PATH = "/admin";
 
 export type AppLocation = {
   pathname: string;
