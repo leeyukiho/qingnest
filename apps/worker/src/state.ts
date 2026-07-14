@@ -1718,6 +1718,23 @@ export async function createPrivatePreview(
   };
 }
 
+export async function createAdminPrivatePreview(
+  env: Env,
+  input: { siteId: string; user: AuthenticatedUser; origin: string },
+) {
+  if (!env.DOMAIN_MAP) throw new Error("私人预览服务尚未配置");
+  const supabase = await requireAdmin(env, input.user);
+  const { data: site, error: siteError } = await supabase.from("sites").select("id, active_deployment_id, status").eq("id", input.siteId).neq("status", "deleted").single();
+  if (siteError || !site) throw new Error("项目不存在");
+  if (!site.active_deployment_id) throw new Error("项目还没有可预览的部署");
+  if (site.status === "blocked") throw new Error("已封禁项目不能预览");
+  const { data: deployment, error: deploymentError } = await supabase.from("deployments").select("id, r2_prefix, spa_fallback_enabled").eq("id", site.active_deployment_id).eq("site_id", input.siteId).single();
+  if (deploymentError || !deployment) throw new Error("找不到可预览的部署");
+  const token = nanoid(32);
+  await env.DOMAIN_MAP.put(`preview:${token}`, JSON.stringify({ siteId: input.siteId, deploymentId: deployment.id, r2Prefix: deployment.r2_prefix, spaFallbackEnabled: deployment.spa_fallback_enabled, status: "active" }), { expirationTtl: 600 });
+  return { url: `${input.origin}/preview/${token}/`, expiresAt: new Date(Date.now() + 600_000).toISOString() };
+}
+
 export async function createUploadSession(
   env: Env,
   input: {

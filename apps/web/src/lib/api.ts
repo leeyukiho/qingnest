@@ -195,7 +195,7 @@ export type AdminOverview = {
   domainPricing: AdminDomainPrice[];
 };
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
-export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
+export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
 export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
 
 const ADMIN_OVERVIEW_CACHE_MS = 30_000;
@@ -234,6 +234,13 @@ export async function getAdminOverview(force = false) {
   const data = await request<AdminOverview>("/api/admin/overview");
   adminOverviewCache = { data, expiresAt: Date.now() + ADMIN_OVERVIEW_CACHE_MS };
   return data;
+}
+
+export async function createAdminPrivatePreview(siteId: string) {
+  return request<{ url: string; expiresAt: string }>(
+    `/api/admin/sites/${encodeURIComponent(siteId)}/preview`,
+    { method: "POST" },
+  );
 }
 
 export async function updateAdminUser(userId: string, input: { role?: AccountRole; plan?: string }) {

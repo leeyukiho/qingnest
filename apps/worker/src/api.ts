@@ -11,6 +11,7 @@ import {
   completeArchiveUpload,
   completeFilesUpload,
   createDraftSite,
+  createAdminPrivatePreview,
   createPublicSlot,
   createPrivatePreview,
   createUploadSession,
@@ -202,6 +203,16 @@ export async function handleApi(request: Request, env: Env) {
       const input = await readJson<AdminSiteUpdateInput>(request);
       if (!input.status) return problem("请选择站点状态", 400);
       return json(await updateAdminSite(env, user, { siteId: decodeURIComponent(adminSiteMatch[1] ?? ""), status: input.status }));
+    }
+    const adminSitePreviewMatch = url.pathname.match(/^\/api\/admin\/sites\/([^/]+)\/preview$/);
+    if (request.method === "POST" && adminSitePreviewMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await createAdminPrivatePreview(env, {
+        siteId: decodeURIComponent(adminSitePreviewMatch[1] ?? ""),
+        user,
+        origin: url.origin,
+      }));
     }
 
     if (request.method === "POST" && url.pathname === "/api/admin/domains") {
