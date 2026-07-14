@@ -1,5 +1,7 @@
-import { FolderKanban, Plus, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { Check, Database, FolderKanban, Globe2, Plus, RotateCcw, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { getPlanConfig } from "@qingnest/shared/config/platform";
 import type { AccountProfile } from "@/lib/api";
+import { formatBytes } from "@/app/deployment-view";
 import { STUDIO_ADMIN_PATH, STUDIO_PATH, STUDIO_PROFILE_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { cn } from "@/lib/utils";
 
@@ -49,10 +51,12 @@ export function StudioSidebar({
         ]
       : [])
   ];
+  const plan = getPlanConfig(account?.plan);
+  const usage = account?.usage;
 
   return (
     <aside
-      className="h-fit w-full min-w-0 overflow-hidden rounded-md border border-white/20 bg-black p-3 lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:h-dvh lg:w-56 lg:overflow-visible lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:p-4 lg:pb-6 lg:pt-24"
+      className="flex h-fit w-full min-w-0 flex-col overflow-hidden rounded-md border border-white/20 bg-black p-3 lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:h-dvh lg:w-56 lg:overflow-visible lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:p-4 lg:pb-5 lg:pt-24"
     >
       <nav
         aria-label="Studio"
@@ -80,6 +84,24 @@ export function StudioSidebar({
           );
         })}
       </nav>
+      {account ? (
+        <button className="mt-3 w-full cursor-pointer border-t border-white/10 pt-4 text-left lg:mt-auto" onClick={() => onNavigate(STUDIO_PROFILE_PATH)} type="button">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/[0.04] text-zinc-200"><UserRound className="h-4 w-4" /></span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-zinc-100">{account.email}</span>
+              <span className="mt-0.5 block text-xs text-zinc-500">{plan.label} · {account.role === "admin" ? "管理员" : "用户"}</span>
+            </span>
+          </div>
+          <span className="mt-4 grid gap-2 rounded-md border border-white/10 bg-white/[0.025] p-3">
+            <span className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-1.5 text-zinc-500"><FolderKanban className="h-3.5 w-3.5" />项目</span><strong className="font-medium text-zinc-200">{usage?.sites ?? 0} / {plan.quotas.user.maxSites}</strong></span>
+            <span className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-1.5 text-zinc-500"><Globe2 className="h-3.5 w-3.5" />公开站点</span><strong className="font-medium text-zinc-200">{usage?.publicSites ?? 0} / {plan.quotas.user.maxPublicSites}</strong></span>
+            <span className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-1.5 text-zinc-500"><Database className="h-3.5 w-3.5" />存储</span><strong className="font-medium text-zinc-200">{formatBytes(usage?.storageBytes ?? 0)} / {formatBytes(plan.quotas.user.maxStorageBytes)}</strong></span>
+            <span className="flex items-center justify-between gap-2 text-xs"><span className="flex items-center gap-1.5 text-zinc-500"><RotateCcw className="h-3.5 w-3.5" />今日发布</span><strong className="font-medium text-zinc-200">{usage?.deploymentsToday ?? 0} / {plan.quotas.user.maxDeploymentsPerDay}</strong></span>
+          </span>
+          <span className="mt-3 flex items-center gap-1.5 text-xs text-zinc-500"><Check className="h-3.5 w-3.5" />支持版本回滚</span>
+        </button>
+      ) : null}
     </aside>
   );
 }

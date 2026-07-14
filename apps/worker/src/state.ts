@@ -16,6 +16,7 @@ type DraftSite = {
   subdomain: string;
   publicUrl: string;
   status: "draft" | "pending_review" | "active" | "blocked";
+  visibility: "private" | "public";
 };
 
 export type ProjectSummary = DraftSite & {
@@ -34,6 +35,15 @@ export type DeploymentSummary = {
 };
 
 export type ProjectDetail = ProjectSummary & { deployments: DeploymentSummary[] };
+
+export type PublicSlot = {
+  id: string;
+  siteId: string | null;
+  hostname: string;
+  publicUrl: string;
+  type: "platform_subdomain" | "custom_domain";
+  status: "active" | "pending_review" | "blocked";
+};
 
 type MemoryUploadSession = {
   siteId: string;
@@ -64,6 +74,12 @@ export type AccountProfile = {
   role: ProfileRole;
   plan: string;
   createdAt: string;
+  usage: {
+    sites: number;
+    publicSites: number;
+    storageBytes: number;
+    deploymentsToday: number;
+  };
 };
 
 export type AdminOverview = {
@@ -110,6 +126,16 @@ async function writeDomainCache(env: Env, subdomain: string, mapping: DomainMapp
 
   try {
     await env.DOMAIN_MAP.put(subdomain, JSON.stringify(mapping));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function deleteDomainCache(env: Env, subdomain: string) {
+  if (!env.DOMAIN_MAP) return false;
+  try {
+    await env.DOMAIN_MAP.delete(subdomain);
     return true;
   } catch {
     return false;
@@ -672,13 +698,41 @@ export async function getAccountProfile(env: Env, user: AuthenticatedUser): Prom
     throw new Error(error?.message ?? "账号资料不存在");
   }
 
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: sites, error: sitesError } = await supabase
+    .from("sites")
+    .select("id, active_deployment_id")
+    .eq("user_id", user.id)
+    .neq("status", "deleted");
+  if (sitesError) throw new Error(sitesError.message);
+
+  const siteIds = (sites ?? []).map((site) => site.id);
+  const activeDeploymentIds = (sites ?? []).map((site) => site.active_deployment_id).filter((id): id is string => Boolean(id));
+  const [{ data: activeDeployments, error: storageError }, { count: deploymentsToday, error: deploymentsError }, { count: publicSites, error: publicSitesError }] = await Promise.all([
+    activeDeploymentIds.length > 0
+      ? supabase.from("deployments").select("total_bytes").in("id", activeDeploymentIds)
+      : Promise.resolve({ data: [], error: null }),
+    siteIds.length > 0
+      ? supabase.from("deployments").select("id", { count: "exact", head: true }).in("site_id", siteIds).gte("created_at", dayAgo)
+      : Promise.resolve({ count: 0, error: null }),
+    supabase.from("domains").select("id", { count: "exact", head: true }).eq("user_id", user.id).neq("status", "deleted")
+  ]);
+  const usageError = storageError ?? deploymentsError ?? publicSitesError;
+  if (usageError) throw new Error(usageError.message);
+
   return {
     id: user.id,
     email: data.email || user.email,
     emailConfirmed: user.emailConfirmed,
     role: data.role,
     plan: data.plan,
-    createdAt: data.created_at
+    createdAt: data.created_at,
+    usage: {
+      sites: sites?.length ?? 0,
+      publicSites: publicSites ?? 0,
+      storageBytes: (activeDeployments ?? []).reduce((total, deployment) => total + Number(deployment.total_bytes ?? 0), 0),
+      deploymentsToday: deploymentsToday ?? 0
+    }
   };
 }
 
@@ -868,8 +922,9 @@ export async function listProjects(env: Env, user?: AuthenticatedUser): Promise<
       id: site.id,
       name: site.name,
       status: projectStatus(site.status),
-      subdomain: hostname.split(".")[0] ?? hostname,
+      subdomain: hostname ? (hostname.split(".")[0] ?? hostname) : "",
       publicUrl: hostname ? getPublicUrlFromHostname(env, hostname) : "",
+      visibility: hostname ? "public" : "private",
       createdAt: site.created_at,
       updatedAt: site.updated_at
     };
@@ -929,14 +984,8 @@ export async function updateProjectName(env: Env, siteId: string, name: string, 
 
 export async function createDraftSite(
   env: Env,
-  input: { name: string; subdomain: string; user?: AuthenticatedUser }
+  input: { name: string; user?: AuthenticatedUser }
 ) {
-  const availability = await checkSubdomainAvailability(env, input.subdomain);
-
-  if (!availability.available) {
-    throw new Error(availability.reason ?? "子域名不可用");
-  }
-
   if (hasServiceSupabase(env)) {
     if (!input.user) {
       throw new Error("请先登录后再创建站点");
@@ -947,13 +996,12 @@ export async function createDraftSite(
     await assertSiteQuota(env, input.user);
 
     const supabase = createServiceSupabase(env);
-    const siteStatus = availability.requiresReview ? "pending_review" : "draft";
     const { data: site, error: siteError } = await supabase
       .from("sites")
       .insert({
         user_id: input.user.id,
         name: input.name,
-        status: siteStatus
+        status: "draft"
       })
       .select("id, name, status")
       .single();
@@ -962,58 +1010,131 @@ export async function createDraftSite(
       throw new Error(siteError.message);
     }
 
-    const { error: domainError } = await supabase.from("domains").insert({
-      site_id: site.id,
-      hostname: availability.hostname ?? getDistributionHostname(env, availability.normalized),
-      type: "platform_subdomain",
-      status: availability.requiresReview ? "pending_review" : "active"
-    });
-
-    if (domainError) {
-      await supabase.from("sites").update({ status: "deleted" }).eq("id", site.id).eq("user_id", input.user.id);
-      throw new Error(domainError.message);
-    }
-
-    const createdSite: DraftSite = {
+    return {
       id: site.id,
       name: site.name,
-      subdomain: availability.normalized,
-      publicUrl: getSiteUrl(env, availability.normalized),
-      status: site.status === "active" ? "active" : site.status === "pending_review" ? "pending_review" : "draft"
+      subdomain: "",
+      publicUrl: "",
+      status: "draft",
+      visibility: "private"
     };
-
-    try {
-      const welcome = await publishWelcomePage(env, createdSite.id, input.user);
-      createdSite.status = welcome.status === "active" ? "active" : "pending_review";
-      claimedSubdomains.add(createdSite.subdomain);
-      return createdSite;
-    } catch (error) {
-      await Promise.all([
-        supabase.from("domains").update({ status: "deleted" }).eq("site_id", site.id),
-        supabase.from("sites").update({ status: "deleted" }).eq("id", site.id).eq("user_id", input.user.id)
-      ]);
-      throw error;
-    }
   }
 
   const site: DraftSite = {
     id: nanoid(),
     name: input.name,
-    subdomain: availability.normalized,
-    publicUrl: getSiteUrl(env, availability.normalized),
-    status: availability.requiresReview ? "pending_review" : "draft"
+    subdomain: "",
+    publicUrl: "",
+    status: "draft",
+    visibility: "private"
   };
 
   draftSites.set(site.id, site);
-  try {
-    const welcome = await publishWelcomePage(env, site.id, input.user);
-    site.status = welcome.status === "active" ? "active" : "pending_review";
-    claimedSubdomains.add(site.subdomain);
-    return site;
-  } catch (error) {
-    draftSites.delete(site.id);
-    throw error;
+  return site;
+}
+
+export async function listPublicSlots(env: Env, user: AuthenticatedUser): Promise<PublicSlot[]> {
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await supabase
+    .from("domains")
+    .select("id, site_id, hostname, type, status")
+    .eq("user_id", user.id)
+    .neq("status", "deleted")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((domain) => ({
+    id: domain.id,
+    siteId: domain.site_id,
+    hostname: domain.hostname,
+    publicUrl: getPublicUrlFromHostname(env, domain.hostname),
+    type: domain.type,
+    status: domain.status === "blocked" ? "blocked" : domain.status === "pending_review" ? "pending_review" : "active"
+  }));
+}
+
+async function getOwnedPublishableSite(env: Env, user: AuthenticatedUser, siteId: string) {
+  const supabase = createServiceSupabase(env);
+  const { data: site, error } = await supabase
+    .from("sites")
+    .select("id, active_deployment_id")
+    .eq("id", siteId)
+    .eq("user_id", user.id)
+    .neq("status", "deleted")
+    .single();
+  if (error || !site) throw new Error("项目不存在或无权访问");
+  if (!site.active_deployment_id) throw new Error("请先为项目发布一个版本，再将它设为公开");
+  const { data: deployment, error: deploymentError } = await supabase
+    .from("deployments")
+    .select("id, r2_prefix, spa_fallback_enabled, status")
+    .eq("id", site.active_deployment_id)
+    .eq("site_id", site.id)
+    .single();
+  if (deploymentError || !deployment || deployment.status !== "active") throw new Error("项目当前没有可公开的有效版本");
+  return { site, deployment };
+}
+
+async function cachePublicSlot(env: Env, domain: { hostname: string; status: string }, siteId: string, deployment: { id: string; r2_prefix: string; spa_fallback_enabled: boolean }) {
+  const subdomain = domain.hostname.split(".")[0] ?? domain.hostname;
+  await writeDomainCache(env, subdomain, {
+    hostname: domain.hostname,
+    siteId,
+    deploymentId: deployment.id,
+    r2Prefix: deployment.r2_prefix,
+    spaFallbackEnabled: deployment.spa_fallback_enabled,
+    status: domain.status === "pending_review" ? "pending_review" : "active"
+  });
+}
+
+export async function createPublicSlot(env: Env, input: { siteId: string; subdomain: string; user: AuthenticatedUser }) {
+  const availability = await checkSubdomainAvailability(env, input.subdomain);
+  if (!availability.available) throw new Error(availability.reason ?? "公开地址不可用");
+  const plan = getPlanConfig(await getUserPlan(env, input.user));
+  const supabase = createServiceSupabase(env);
+  const { count, error: countError } = await supabase.from("domains").select("id", { count: "exact", head: true }).eq("user_id", input.user.id).neq("status", "deleted");
+  if (countError) throw new Error(countError.message);
+  if ((count ?? 0) >= plan.quotas.user.maxPublicSites) throw new Error(`当前套餐最多同时公开 ${plan.quotas.user.maxPublicSites} 个项目`);
+  const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
+  const { data: domain, error } = await supabase.from("domains").insert({
+    user_id: input.user.id,
+    site_id: input.siteId,
+    hostname: availability.hostname ?? getDistributionHostname(env, availability.normalized),
+    type: "platform_subdomain",
+    status: availability.requiresReview ? "pending_review" : "active"
+  }).select("id, site_id, hostname, type, status").single();
+  if (error || !domain) throw new Error(error?.message ?? "公开地址创建失败");
+  await cachePublicSlot(env, domain, input.siteId, deployment);
+  return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
+}
+
+export async function switchPublicSlot(env: Env, input: { slotId: string; siteId: string | null; user: AuthenticatedUser }) {
+  const supabase = createServiceSupabase(env);
+  const { data: domain, error: domainError } = await supabase.from("domains").select("id, hostname, status").eq("id", input.slotId).eq("user_id", input.user.id).neq("status", "deleted").single();
+  if (domainError || !domain) throw new Error("公开地址不存在或无权操作");
+  if (!input.siteId) {
+    const { error } = await supabase.from("domains").update({ site_id: null }).eq("id", domain.id).eq("user_id", input.user.id);
+    if (error) throw new Error(error.message);
+    await deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname);
+  } else {
+    const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
+    const { error } = await supabase.from("domains").update({ site_id: input.siteId }).eq("id", domain.id).eq("user_id", input.user.id);
+    if (error) throw new Error(error.message);
+    await cachePublicSlot(env, domain, input.siteId, deployment);
   }
+  return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
+}
+
+export async function createPrivatePreview(env: Env, input: { siteId: string; user: AuthenticatedUser; origin: string }) {
+  if (!env.DOMAIN_MAP) throw new Error("私人预览服务尚未配置");
+  const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
+  const token = nanoid(32);
+  await env.DOMAIN_MAP.put(`preview:${token}`, JSON.stringify({
+    siteId: input.siteId,
+    deploymentId: deployment.id,
+    r2Prefix: deployment.r2_prefix,
+    spaFallbackEnabled: deployment.spa_fallback_enabled,
+    status: "active"
+  }), { expirationTtl: 600 });
+  return { url: `${input.origin}/preview/${token}/`, expiresAt: new Date(Date.now() + 600_000).toISOString() };
 }
 
 export async function createUploadSession(
@@ -1259,26 +1380,12 @@ async function getPersistentUploadTarget(
     throw new Error("当前部署状态不能继续上传");
   }
 
-  const { data: domain, error: domainError } = await supabase
-    .from("domains")
-    .select("hostname")
-    .eq("site_id", session.site_id)
-    .eq("type", "platform_subdomain")
-    .neq("status", "deleted")
-    .single();
-
-  if (domainError || !domain?.hostname) {
-    throw new Error("站点域名不存在");
-  }
-
-  const subdomain = domain.hostname.split(".")[0] ?? domain.hostname;
-
   return {
     siteId: session.site_id,
     deploymentId: deployment.id,
-    subdomain,
-    publicUrl: getPublicUrlFromHostname(env, domain.hostname),
-    hostname: domain.hostname,
+    subdomain: "",
+    publicUrl: "",
+    hostname: "",
     r2Prefix: deployment.r2_prefix,
     status: deployment.status,
     spaFallbackEnabled: deployment.spa_fallback_enabled
@@ -1389,16 +1496,13 @@ async function completePersistentDeploymentUpload(
     message: `Deployment ${target.deploymentId} uploaded with status ${finalStatus}`
   });
 
-  const mapping: DomainMapping = {
-    hostname: target.hostname,
-    siteId: target.siteId,
-    deploymentId: target.deploymentId,
-    r2Prefix: target.r2Prefix,
-    spaFallbackEnabled: prepared.scan.spaFallbackRecommended,
-    status: finalStatus
-  };
-
-  await writeDomainCache(env, target.subdomain, mapping);
+  const { data: boundDomains } = await supabase.from("domains").select("hostname, status").eq("site_id", target.siteId).neq("status", "deleted");
+  if (boundDomains?.[0]?.hostname) target.publicUrl = getPublicUrlFromHostname(env, boundDomains[0].hostname);
+  await Promise.all((boundDomains ?? []).map((domain) => cachePublicSlot(env, domain, target.siteId, {
+    id: target.deploymentId,
+    r2_prefix: target.r2Prefix,
+    spa_fallback_enabled: prepared.scan.spaFallbackRecommended
+  })));
   if (finalStatus === "active") {
     const previous = previousDeployments ?? [];
     const cleanupResults = await Promise.allSettled(previous.map((deployment) => deleteDeploymentPrefix(env, deployment.r2_prefix)));
@@ -1630,9 +1734,10 @@ export async function getDomainMapping(env: Env, hostname: string) {
     .neq("status", "deleted")
     .maybeSingle();
 
-  if (domainError || !domain) {
+  if (domainError || !domain || !domain.site_id) {
     return null;
   }
+  const boundDomain = { ...domain, site_id: domain.site_id };
 
   const { data: site, error: siteError } = await supabase
     .from("sites")
@@ -1646,7 +1751,7 @@ export async function getDomainMapping(env: Env, hostname: string) {
   }
 
   if (!site.active_deployment_id) {
-    return provisionLegacyWelcomeDeployment(env, domain, site);
+    return provisionLegacyWelcomeDeployment(env, boundDomain, site);
   }
 
   const { data: deployment, error: deploymentError } = await supabase
@@ -1661,7 +1766,7 @@ export async function getDomainMapping(env: Env, hostname: string) {
 
   const mapping: DomainMapping = {
     hostname: domain.hostname,
-    siteId: domain.site_id,
+    siteId: boundDomain.site_id,
     deploymentId: deployment.id,
     r2Prefix: deployment.r2_prefix,
     spaFallbackEnabled: deployment.spa_fallback_enabled,

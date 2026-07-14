@@ -4,6 +4,7 @@ import { BadgeCheck, Crown, LayoutDashboard, Loader2, Lock, LogOut, Plus, UserRo
 import type { AccountProfile } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { StudioSidebar } from "@/app/StudioSidebar";
+import { ToastMessage } from "@/app/toast";
 import { isSessionEmailConfirmed } from "@/app/auth";
 import { STUDIO_ADMIN_PATH, STUDIO_PATH } from "@/app/navigation";
 import { StudioLoading } from "@/app/feedback";
@@ -123,11 +124,7 @@ export function ProfilePage({
               <span>{emailConfirmed ? "邮箱已验证，可以发布站点。" : "邮箱未验证，创建站点前必须验证。"}</span>
             </div>
 
-            {error ? (
-              <p className="mt-4 rounded-md border border-white/30 bg-black px-3 py-3 text-sm leading-6 text-zinc-200">
-                {error}
-              </p>
-            ) : null}
+            <ToastMessage message={error} />
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               {account?.role === "admin" ? (

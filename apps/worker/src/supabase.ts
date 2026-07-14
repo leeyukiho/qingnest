@@ -83,7 +83,8 @@ export type Database = {
       domains: {
         Row: {
           id: string;
-          site_id: string;
+          user_id: string;
+          site_id: string | null;
           hostname: string;
           type: "platform_subdomain" | "custom_domain";
           status: "active" | "pending_review" | "blocked" | "deleted";
@@ -91,13 +92,15 @@ export type Database = {
         };
         Insert: {
           id?: string;
-          site_id: string;
+          user_id: string;
+          site_id?: string | null;
           hostname: string;
           type: "platform_subdomain" | "custom_domain";
           status?: "active" | "pending_review" | "blocked" | "deleted";
           created_at?: string;
         };
         Update: {
+          site_id?: string | null;
           status?: "active" | "pending_review" | "blocked" | "deleted";
         };
         Relationships: EmptyRelationships;

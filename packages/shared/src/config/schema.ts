@@ -11,6 +11,7 @@ const planSchema = z.object({
   quotas: z.object({
     user: z.object({
       maxSites: z.number().int().positive(),
+      maxPublicSites: z.number().int().positive(),
       maxStorageBytes: z.number().int().positive(),
       maxDeploymentsPerDay: z.number().int().positive(),
       maxUploadSessionsPerHour: z.number().int().positive()

@@ -8,12 +8,16 @@ import {
   completeArchiveUpload,
   completeFilesUpload,
   createDraftSite,
+  createPublicSlot,
+  createPrivatePreview,
   createUploadSession,
   getAccountProfile,
   getAdminOverview,
   getAuthenticatedUser,
   getProject,
   listProjects,
+  listPublicSlots,
+  switchPublicSlot,
   updateProjectName,
   signUpWithEmailPassword
 } from "./state";
@@ -22,8 +26,10 @@ import type { Env } from "./types";
 
 type SiteCreateInput = {
   name?: string;
-  subdomain?: string;
 };
+
+type PublicSlotInput = { siteId?: string; subdomain?: string };
+type PublicSlotUpdateInput = { siteId?: string | null };
 
 type SiteUpdateInput = { name?: string };
 
@@ -136,14 +142,9 @@ export async function handleApi(request: Request, env: Env) {
     if (request.method === "POST" && url.pathname === "/api/sites") {
       const input = await readJson<SiteCreateInput>(request);
 
-      if (!input.subdomain) {
-        return problem("缺少子域名");
-      }
-
       const user = await maybeGetUser(request, env);
       const site = await createDraftSite(env, {
         name: input.name?.trim() || "未命名站点",
-        subdomain: input.subdomain,
         user
       });
       return json(site, { status: 201 });
@@ -152,6 +153,28 @@ export async function handleApi(request: Request, env: Env) {
     if (request.method === "GET" && url.pathname === "/api/sites") {
       const user = await maybeGetUser(request, env);
       return json(await listProjects(env, user));
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/public-slots") {
+      const user = await maybeGetUser(request, env);
+      if (!user) return problem("请先登录", 401);
+      return json(await listPublicSlots(env, user));
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/public-slots") {
+      const input = await readJson<PublicSlotInput>(request);
+      if (!input.siteId || !input.subdomain) return problem("缺少项目或公开地址");
+      const user = await maybeGetUser(request, env);
+      if (!user) return problem("请先登录", 401);
+      return json(await createPublicSlot(env, { siteId: input.siteId, subdomain: input.subdomain, user }), { status: 201 });
+    }
+
+    const slotMatch = url.pathname.match(/^\/api\/public-slots\/([^/]+)$/);
+    if (request.method === "PATCH" && slotMatch) {
+      const input = await readJson<PublicSlotUpdateInput>(request);
+      const user = await maybeGetUser(request, env);
+      if (!user) return problem("请先登录", 401);
+      return json(await switchPublicSlot(env, { slotId: decodeURIComponent(slotMatch[1] ?? ""), siteId: input.siteId ?? null, user }));
     }
 
     const siteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)$/);
@@ -164,6 +187,13 @@ export async function handleApi(request: Request, env: Env) {
       const input = await readJson<SiteUpdateInput>(request);
       const user = await maybeGetUser(request, env);
       return json(await updateProjectName(env, decodeURIComponent(siteMatch[1] ?? ""), input.name ?? "", user));
+    }
+
+    const previewMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/preview$/);
+    if (request.method === "POST" && previewMatch) {
+      const user = await maybeGetUser(request, env);
+      if (!user) return problem("请先登录", 401);
+      return json(await createPrivatePreview(env, { siteId: decodeURIComponent(previewMatch[1] ?? ""), user, origin: url.origin }));
     }
 
     if (request.method === "POST" && url.pathname === "/api/upload-sessions") {

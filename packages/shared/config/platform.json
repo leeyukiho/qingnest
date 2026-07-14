@@ -80,6 +80,7 @@
       "quotas": {
         "user": {
           "maxSites": 3,
+          "maxPublicSites": 1,
           "maxStorageBytes": 157286400,
           "maxDeploymentsPerDay": 20,
           "maxUploadSessionsPerHour": 10
@@ -122,6 +123,7 @@
       "quotas": {
         "user": {
           "maxSites": 20,
+          "maxPublicSites": 3,
           "maxStorageBytes": 2147483648,
           "maxDeploymentsPerDay": 100,
           "maxUploadSessionsPerHour": 50
@@ -164,6 +166,7 @@
       "quotas": {
         "user": {
           "maxSites": 100,
+          "maxPublicSites": 10,
           "maxStorageBytes": 21474836480,
           "maxDeploymentsPerDay": 500,
           "maxUploadSessionsPerHour": 200

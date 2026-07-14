@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { ArrowRight, ExternalLink, FolderKanban, Plus } from "lucide-react";
+import { ArrowRight, ExternalLink, FolderKanban, Globe2, Lock, Plus } from "lucide-react";
 import { StudioSidebar } from "@/app/StudioSidebar";
+import { ToastMessage } from "@/app/toast";
 import { getStatusLabel } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
 import { STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
@@ -38,7 +39,7 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
               </button>
             </div>
 
-            {error ? <p className="mt-5 rounded-md border border-white/20 p-4 text-sm text-zinc-300">{error}</p> : null}
+            <ToastMessage message={error} />
             {!loading && projects.length === 0 ? (
               <div className={`${STUDIO_PANEL_CLASS} mt-5 flex min-h-64 flex-col items-center justify-center p-8 text-center`}>
                 <FolderKanban className="h-7 w-7 text-zinc-500" />
@@ -52,9 +53,9 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="truncate text-base font-semibold text-white">{project.name}</h2>
-                        <p className="mt-2 truncate text-sm text-zinc-500">{project.subdomain}</p>
+                        <p className="mt-2 flex items-center gap-1.5 truncate text-sm text-zinc-500">{project.visibility === "public" ? <Globe2 className="h-3.5 w-3.5 shrink-0" /> : <Lock className="h-3.5 w-3.5 shrink-0" />}{project.visibility === "public" ? project.subdomain : "仅自己可见"}</p>
                       </div>
-                      <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400">{getStatusLabel(project.status)}</span>
+                      <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400">{project.visibility === "public" ? "已公开" : getStatusLabel(project.status)}</span>
                     </div>
                     <p className="mt-5 text-xs text-zinc-600">更新于 {new Date(project.updatedAt).toLocaleString("zh-CN")}</p>
                     <div className="mt-auto flex items-center gap-2 pt-5">

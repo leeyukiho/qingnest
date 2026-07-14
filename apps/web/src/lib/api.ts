@@ -64,6 +64,7 @@ export type SiteDraft = {
   subdomain: string;
   publicUrl: string;
   status: "draft" | "pending_review" | "active" | "blocked";
+  visibility: "private" | "public";
 };
 
 export type ProjectSummary = SiteDraft & {
@@ -110,6 +111,12 @@ export type AccountProfile = {
   role: AccountRole;
   plan: string;
   createdAt: string;
+  usage: {
+    sites: number;
+    publicSites: number;
+    storageBytes: number;
+    deploymentsToday: number;
+  };
 };
 
 export type AdminOverview = {
@@ -155,11 +162,36 @@ export async function checkSubdomain(subdomain: string) {
   return request<SubdomainCheck>(`/api/subdomains/check?${params}`);
 }
 
-export async function createSite(input: { name: string; subdomain: string }) {
+export async function createSite(input: { name: string }) {
   return request<SiteDraft>("/api/sites", {
     method: "POST",
     body: JSON.stringify(input)
   });
+}
+
+export type PublicSlot = {
+  id: string;
+  siteId: string | null;
+  hostname: string;
+  publicUrl: string;
+  type: "platform_subdomain" | "custom_domain";
+  status: "active" | "pending_review" | "blocked";
+};
+
+export async function listPublicSlots() {
+  return request<PublicSlot[]>("/api/public-slots");
+}
+
+export async function createPublicSlot(input: { siteId: string; subdomain: string }) {
+  return request<PublicSlot>("/api/public-slots", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function switchPublicSlot(slotId: string, siteId: string | null) {
+  return request<PublicSlot>(`/api/public-slots/${encodeURIComponent(slotId)}`, { method: "PATCH", body: JSON.stringify({ siteId }) });
+}
+
+export async function createPrivatePreview(siteId: string) {
+  return request<{ url: string; expiresAt: string }>(`/api/sites/${encodeURIComponent(siteId)}/preview`, { method: "POST" });
 }
 
 export async function listProjects() {

@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { Check, ChevronLeft, ChevronRight, ExternalLink, FileCheck2, Globe2, Loader2, Rocket, UploadCloud } from "lucide-react";
-import { getPlanConfig, validateSubdomain } from "@qingnest/shared/config/platform";
+import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
+import { ToastMessage } from "@/app/toast";
 import { formatBytes, getIssueClass, getRiskLabel, hasBlockingScanIssues } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
 import { STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
 import { FileUpload } from "@/components/ui/file-upload";
-import { checkSubdomain, createSite, createUploadSession, getProject, uploadArchive, uploadFiles, type AccountProfile, type SiteDraft, type UploadArchiveResult } from "@/lib/api";
+import { createSite, createUploadSession, getProject, uploadArchive, uploadFiles, type AccountProfile, type SiteDraft, type UploadArchiveResult } from "@/lib/api";
 import { prepareProjectDeployment, type PreparedUploadFile, type SelectedUploadFile } from "@/lib/archive";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +30,6 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
 }) {
   const [step, setStep] = useState<Step>(1);
   const [siteName, setSiteName] = useState("");
-  const [subdomain, setSubdomain] = useState("");
   const [site, setSite] = useState<SiteDraft | null>(null);
   const [files, setFiles] = useState<SelectedUploadFile[]>([]);
   const [prepared, setPrepared] = useState<PreparedProject | null>(null);
@@ -42,7 +42,6 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
 
   const planName = account?.plan ?? "free";
   const plan = getPlanConfig(planName);
-  const validation = useMemo(() => subdomain.trim() ? validateSubdomain(subdomain) : null, [subdomain]);
   const blocked = hasBlockingScanIssues(prepared?.scan ?? null);
 
   useEffect(() => {
@@ -54,7 +53,6 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
       .then((project) => {
         setSite(project);
         setSiteName(project.name);
-        setSubdomain(project.subdomain);
         setStep(2);
       })
       .catch(() => window.history.replaceState({}, "", "/studio"))
@@ -67,15 +65,10 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
     setError(null);
 
     if (!siteName.trim()) return setError("请输入项目名称");
-    if (!validation?.ok) return setError(validation?.reason ?? "请输入可用的域名");
-
     setCreating(true);
     try {
-      const availability = await checkSubdomain(validation.normalized);
-      if (!availability.available) throw new Error(availability.reason ?? "这个域名不可用");
-      const created = await createSite({ name: siteName.trim(), subdomain: availability.normalized });
+      const created = await createSite({ name: siteName.trim() });
       setSite(created);
-      setSubdomain(created.subdomain);
       setStep(2);
       window.history.replaceState({}, "", `/studio?project=${encodeURIComponent(created.id)}`);
     } catch (cause) {
@@ -151,14 +144,12 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
               })}
             </ol>
 
-            {error ? <p className="mt-5 rounded-md border border-white/20 bg-white/[0.03] px-4 py-3 text-sm text-zinc-200">{error}</p> : null}
+            <ToastMessage message={error} />
 
             {step === 1 ? <form className={`${STUDIO_PANEL_CLASS} mt-5 max-w-3xl p-5 sm:p-6`} onSubmit={createProject}>
-              <div className="grid gap-5 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm font-medium text-zinc-200">项目名称<input className="h-11 rounded-md border border-white/20 bg-black px-3 text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-white/50" disabled={creating} maxLength={80} onChange={(event) => setSiteName(event.target.value)} placeholder="例如：个人作品集" value={siteName} /></label>
-                <label className="grid gap-2 text-sm font-medium text-zinc-200">域名<div className={cn("grid grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border bg-black", validation && !validation.ok ? "border-white/40" : "border-white/20 focus-within:border-white/50")}><input className="h-11 min-w-0 bg-transparent px-3 text-white outline-none placeholder:text-zinc-600" disabled={creating} onChange={(event) => setSubdomain(event.target.value.toLowerCase())} placeholder="my-project" value={subdomain} /><span className="inline-flex items-center border-l border-white/15 px-3 text-sm text-zinc-500">.985201314.xyz</span></div></label>
-              </div>
-              <button className="mt-6 inline-flex h-11 cursor-pointer items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={creating || !siteName.trim() || !validation?.ok} type="submit">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}{creating ? "正在创建" : "创建并继续"}</button>
+              <label className="grid max-w-xl gap-2 text-sm font-medium text-zinc-200">项目名称<input className="h-11 rounded-md border border-white/20 bg-black px-3 text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-white/50" disabled={creating} maxLength={80} onChange={(event) => setSiteName(event.target.value)} placeholder="例如：个人作品集" value={siteName} /></label>
+              <p className="mt-4 text-sm leading-6 text-zinc-500">项目创建后默认为仅自己可见。完成部署后，可以将公开地址切换到这个项目。</p>
+              <button className="mt-6 inline-flex h-11 cursor-pointer items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={creating || !siteName.trim()} type="submit">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}{creating ? "正在创建" : "创建私人项目"}</button>
             </form> : null}
 
             {step === 2 && site ? <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
@@ -177,13 +168,13 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
                   <button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" disabled={!prepared || blocked || analyzing} onClick={() => setStep(3)} type="button">确认资源<ChevronRight className="h-4 w-4" /></button>
                 </div>
               </div>
-              <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}><p className="text-xs text-zinc-500">项目已创建</p><p className="mt-2 truncate text-sm font-semibold text-white">{site.name}</p><a className="mt-3 flex items-center gap-2 break-all text-sm text-zinc-400 hover:text-white" href={site.publicUrl} rel="noreferrer" target="_blank">{site.publicUrl}<ExternalLink className="h-4 w-4 shrink-0" /></a><p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-500">现在退出也不会丢失。链接已显示默认页面，可从“我的项目”继续上传。</p></aside>
+              <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}><p className="text-xs text-zinc-500">私人项目已创建</p><p className="mt-2 truncate text-sm font-semibold text-white">{site.name}</p><p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-400"><Globe2 className="h-4 w-4" />仅自己可见</p><p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-500">现在退出也不会丢失。部署完成后，可在项目详情中绑定或切换公开地址。</p></aside>
             </div> : null}
 
             {step === 3 && site && prepared ? <div className={`${STUDIO_PANEL_CLASS} mt-5 max-w-4xl p-5 sm:p-6`}>
-              {result ? <div className="py-4 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-white/20"><Check className="h-5 w-5" /></span><h2 className="mt-4 text-xl font-semibold">部署完成</h2><p className="mt-2 text-sm text-zinc-400">{result.fileCount} 个文件，{formatBytes(result.totalBytes)}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><a className="inline-flex h-10 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black" href={result.publicUrl} rel="noreferrer" target="_blank">访问站点<ExternalLink className="h-4 w-4" /></a><button className="inline-flex h-10 cursor-pointer items-center rounded-md border border-white/15 px-4 text-sm text-zinc-300" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${site.id}`)} type="button">管理项目</button></div></div> : <>
+              {result ? <div className="py-4 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-white/20"><Check className="h-5 w-5" /></span><h2 className="mt-4 text-xl font-semibold">私人版本已部署</h2><p className="mt-2 text-sm text-zinc-400">{result.fileCount} 个文件，{formatBytes(result.totalBytes)}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button className="inline-flex h-10 cursor-pointer items-center rounded-md bg-white px-4 text-sm font-semibold text-black" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${site.id}`)} type="button">管理公开设置</button></div></div> : <>
                 <div className="flex items-start gap-3"><FileCheck2 className="mt-0.5 h-5 w-5 text-zinc-400" /><div><h2 className="text-base font-semibold">部署确认</h2><p className="mt-1 text-sm text-zinc-500">{site.name} · {prepared.scan.fileCount} 个文件 · {formatBytes(prepared.scan.totalBytes)} · {getRiskLabel(prepared.scan.riskLevel)}</p></div></div>
-                <div className="mt-5 grid gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 sm:grid-cols-2"><div className="bg-black p-4"><p className="text-xs text-zinc-500">访问地址</p><p className="mt-2 break-all text-sm text-white">{site.publicUrl}</p></div><div className="bg-black p-4"><p className="text-xs text-zinc-500">入口文件</p><p className="mt-2 text-sm text-white">{prepared.scan.entrypoint}</p></div></div>
+                <div className="mt-5 grid gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 sm:grid-cols-2"><div className="bg-black p-4"><p className="text-xs text-zinc-500">可见范围</p><p className="mt-2 text-sm text-white">仅自己可见</p></div><div className="bg-black p-4"><p className="text-xs text-zinc-500">入口文件</p><p className="mt-2 text-sm text-white">{prepared.scan.entrypoint}</p></div></div>
                 <div className="mt-6 flex flex-wrap gap-3"><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-300 hover:bg-white/5" disabled={deploying} onClick={() => setStep(2)} type="button"><ChevronLeft className="h-4 w-4" />返回修改</button><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" disabled={deploying} onClick={deploy} type="button">{deploying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}{deploying ? "正在部署" : "部署项目"}</button></div>
               </>}
             </div> : null}

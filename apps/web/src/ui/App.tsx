@@ -29,6 +29,7 @@ import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { ToastProvider } from "@/app/toast";
 
 export function App() {
   const [location, setLocation] = useState(getBrowserLocation);
@@ -210,7 +211,8 @@ export function App() {
           emailConfirmed: isSessionEmailConfirmed(session),
           role: "user",
           plan: "free",
-          createdAt: session.user.created_at ?? new Date().toISOString()
+          createdAt: session.user.created_at ?? new Date().toISOString(),
+          usage: { sites: 0, publicSites: 0, storageBytes: 0, deploymentsToday: 0 }
         });
       });
 
@@ -285,6 +287,7 @@ export function App() {
   ) : routeContent;
 
   return (
+    <ToastProvider>
     <main className={cn("fixed inset-0 h-dvh w-screen bg-black text-white", isHomeRoute ? "overflow-hidden" : "overflow-y-auto")}>
       <LayoutGroup>
         <SiteNavbar
@@ -298,5 +301,6 @@ export function App() {
         {displayedRouteContent}
       </LayoutGroup>
     </main>
+    </ToastProvider>
   );
 }

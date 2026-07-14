@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { Crown, LayoutDashboard, Loader2, Lock, LogIn } from "lucide-react";
 import { getAdminOverview, type AccountProfile, type AdminOverview } from "@/lib/api";
 import { StudioSidebar } from "@/app/StudioSidebar";
+import { ToastMessage } from "@/app/toast";
 import { RouteMessage, StudioLoading } from "@/app/feedback";
 import { STUDIO_PATH } from "@/app/navigation";
 import {
@@ -147,11 +148,7 @@ export function AdminPage({
           </div>
         ) : null}
 
-        {error ? (
-          <p className="mt-5 rounded-md border border-white/30 bg-black px-3 py-3 text-sm leading-6 text-zinc-200">
-            {error}
-          </p>
-        ) : null}
+        <ToastMessage message={error} />
 
         {overview ? (
           <div className={cn(STUDIO_PANEL_CLASS, "mt-5 grid overflow-hidden sm:grid-cols-2 lg:grid-cols-5")}>

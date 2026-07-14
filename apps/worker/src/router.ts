@@ -27,7 +27,10 @@ function candidatePaths(pathname: string) {
 
 export async function handleSiteRequest(request: Request, env: Env) {
   const url = new URL(request.url);
-  const mapping = await getDomainMapping(env, url.hostname);
+  const previewMatch = url.pathname.match(/^\/preview\/([^/]+)(\/.*)?$/);
+  const previewValue = previewMatch && env.DOMAIN_MAP ? await env.DOMAIN_MAP.get(`preview:${previewMatch[1]}`) : null;
+  const mapping = previewValue ? JSON.parse(previewValue) as Awaited<ReturnType<typeof getDomainMapping>> : await getDomainMapping(env, url.hostname);
+  const requestPathname = previewMatch ? (previewMatch[2] || "/") : url.pathname;
 
   if (!mapping) {
     return withSecurityHeaders(problem("站点不存在", 404));
@@ -47,7 +50,7 @@ export async function handleSiteRequest(request: Request, env: Env) {
     return withSecurityHeaders(problem("SITE_ASSETS R2 binding is not configured", 503));
   }
 
-  for (const path of candidatePaths(url.pathname)) {
+  for (const path of candidatePaths(requestPathname)) {
     const object = await siteAssets.get(`${mapping.r2Prefix}/${path}`);
 
     if (object) {
