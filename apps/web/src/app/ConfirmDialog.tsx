@@ -87,12 +87,12 @@ export function ConfirmDialog({
         </div>
         {confirmationText ? (
           <div className="mt-5">
-            <p className="text-sm text-zinc-400">请输入项目名称以确认删除：</p>
+            <p className="text-sm text-zinc-400">请输入以下内容以确认操作：</p>
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2 rounded-md border border-white/15 bg-black px-3 py-2">
               <code className="min-w-0 truncate text-sm font-medium text-zinc-200">{confirmationText}</code>
-              <button aria-label="复制项目名称" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={async () => { await navigator.clipboard.writeText(confirmationText); setCopied(true); }} type="button">{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? "已复制" : "复制"}</button>
+              <button aria-label="复制确认内容" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-400 hover:bg-white/10 hover:text-white" onClick={async () => { await navigator.clipboard.writeText(confirmationText); setCopied(true); }} type="button">{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? "已复制" : "复制"}</button>
             </div>
-            <label className="mt-3 grid gap-2 text-sm text-zinc-300">项目名称<input autoComplete="off" autoFocus className="h-10 w-full rounded-md border border-white/20 bg-black px-3 text-white outline-none placeholder:text-zinc-600 focus:border-white/50" disabled={busy} onChange={(event) => setConfirmation(event.target.value)} placeholder={confirmationText} value={confirmation} /></label>
+            <label className="mt-3 grid gap-2 text-sm text-zinc-300">确认内容<input autoComplete="off" autoFocus className="h-10 w-full rounded-md border border-white/20 bg-black px-3 text-white outline-none placeholder:text-zinc-600 focus:border-white/50" disabled={busy} onChange={(event) => setConfirmation(event.target.value)} placeholder={confirmationText} value={confirmation} /></label>
           </div>
         ) : null}
         <div className="mt-6 flex justify-end gap-2">

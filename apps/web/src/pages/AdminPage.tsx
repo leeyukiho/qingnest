@@ -1,90 +1,80 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { Activity, Crown, Database, FolderKanban, Gauge, LayoutDashboard, Loader2, Lock, LogIn, RefreshCw, ShieldAlert, Users } from "lucide-react";
-import { getAdminOverview, updateAdminSite, updateAdminUser, type AccountProfile, type AdminOverview } from "@/lib/api";
+import { Activity, Crown, FolderKanban, Gauge, Globe2, LayoutDashboard, Loader2, Lock, Plus, RefreshCw, Save, ShieldAlert, Trash2, Users, WalletCards } from "lucide-react";
+import { ConfirmDialog } from "@/app/ConfirmDialog";
+import { RouteMessage, StudioLoading } from "@/app/feedback";
+import { STUDIO_PATH } from "@/app/navigation";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
-import { RouteMessage, StudioLoading } from "@/app/feedback";
-import { formatBytes } from "@/app/deployment-view";
-import { STUDIO_PATH } from "@/app/navigation";
-import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_EYEBROW_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_TITLE_CLASS, STUDIO_SECTION_CLASS } from "@/app/ui";
+import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_EYEBROW_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
+import { createAdminDomain, deleteAdminDomain, getAdminOverview, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminOverview, type AdminPlan } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type AdminTab = "overview" | "users" | "sites" | "reviews" | "audit";
+type AdminTab = "overview" | "users" | "projects" | "domains" | "plans" | "reviews" | "audit";
+type PendingAction = { title: string; description: string; destructive?: boolean; confirmationText?: string; confirmLabel?: string; run: () => Promise<unknown> };
 const tabs = [
-  { id: "overview", label: "概览", icon: Gauge },
-  { id: "users", label: "用户", icon: Users },
-  { id: "sites", label: "站点", icon: FolderKanban },
-  { id: "reviews", label: "审核", icon: ShieldAlert },
-  { id: "audit", label: "审计", icon: Activity },
+  ["overview", "概览", Gauge], ["users", "用户", Users], ["projects", "项目", FolderKanban], ["domains", "域名", Globe2], ["plans", "套餐与权益", WalletCards], ["reviews", "审核", ShieldAlert], ["audit", "审计", Activity],
 ] as const;
 const siteStatusLabels: Record<string, string> = { draft: "草稿", active: "正常", pending_review: "待审核", blocked: "已封禁", deleted: "已删除" };
-const fieldClass = "h-9 rounded-md border border-white/20 bg-black px-2 text-sm text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white";
-
-function dateTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-}
+const fieldClass = "h-9 rounded-md border border-white/20 bg-black px-2 text-sm text-zinc-200 outline-none focus:border-white/50";
+const dateTime = (value: string) => new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 
 export function AdminPage({ account, authReady, onNavigate, session }: { account: AccountProfile | null; authReady: boolean; onNavigate: (path: string) => void; session: Session | null }) {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [tab, setTab] = useState<AdminTab>("overview");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [domainForm, setDomainForm] = useState({ userId: "", hostname: "", type: "platform_subdomain" as "platform_subdomain" | "custom_domain" });
+  const [planDrafts, setPlanDrafts] = useState<Record<string, AdminPlan>>({});
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, AdminDomainPrice>>({});
 
   const load = useCallback(async (force = false) => {
     if (!session || account?.role !== "admin") return;
-    setLoading(true);
-    setError(null);
-    try { setOverview(await getAdminOverview(force)); }
-    catch (adminError) { setError(adminError instanceof Error ? adminError.message : "无法读取管理员数据"); }
+    setLoading(true); setError(null);
+    try { const data = await getAdminOverview(force); setOverview(data); setPlanDrafts(Object.fromEntries(data.plans.map((item) => [item.key, item]))); setPriceDrafts(Object.fromEntries(data.domainPricing.map((item) => [item.domain_type, item]))); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取管理员数据"); }
     finally { setLoading(false); }
   }, [account?.role, session]);
-
   useEffect(() => { void load(); }, [load]);
+  const usersById = useMemo(() => new Map((overview?.recentUsers ?? []).map((user) => [user.id, user])), [overview]);
 
-  async function changeUser(userId: string, email: string, field: "role" | "plan", value: string) {
-    if (!window.confirm(`确认修改 ${email} 的${field === "role" ? "角色" : "套餐"}？`)) return;
-    setSavingId(userId); setError(null);
-    try { await updateAdminUser(userId, { [field]: value }); await load(true); }
-    catch (changeError) { setError(changeError instanceof Error ? changeError.message : "更新失败"); }
-    finally { setSavingId(null); }
-  }
-
-  async function changeSite(siteId: string, name: string, status: "draft" | "active" | "pending_review" | "blocked") {
-    if (!window.confirm(`确认将“${name}”调整为“${siteStatusLabels[status]}”？${status === "blocked" ? "公开访问将立即失效。" : ""}`)) return;
-    setSavingId(siteId); setError(null);
-    try { await updateAdminSite(siteId, status); await load(true); }
-    catch (changeError) { setError(changeError instanceof Error ? changeError.message : "更新失败"); }
-    finally { setSavingId(null); }
-  }
+  function confirm(action: PendingAction) { setPending(action); }
+  async function execute() { if (!pending) return; setBusy(true); setError(null); try { await pending.run(); setPending(null); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "操作失败"); } finally { setBusy(false); } }
+  function changeUser(userId: string, email: string, field: "role" | "plan", value: string) { confirm({ title: field === "role" ? "确认修改用户角色" : "确认修改用户套餐", description: `将 ${email} 的${field === "role" ? "角色" : "套餐"}修改为 ${value}。该操作会立即影响权限或配额。`, destructive: field === "role" && value === "user", run: () => updateAdminUser(userId, { [field]: value }) }); }
+  function changeProject(id: string, name: string, status: "draft" | "active" | "pending_review" | "blocked") { confirm({ title: "确认修改项目状态", description: `将“${name}”调整为“${siteStatusLabels[status]}”。${status === "blocked" ? "项目绑定域名将立即停止访问。" : ""}`, destructive: status === "blocked", run: () => updateAdminSite(id, status) }); }
+  function changeDomain(id: string, hostname: string, status: "active" | "pending_review" | "blocked") { confirm({ title: "确认修改域名状态", description: `将 ${hostname} 调整为“${siteStatusLabels[status]}”。缓存映射会同步失效。`, destructive: status === "blocked", run: () => updateAdminDomain(id, { status }) }); }
 
   if (!authReady) return <StudioLoading account={account} active="admin" label="正在读取账号" onNavigate={onNavigate} />;
-  if (!session) return <RouteMessage actionLabel="登录" icon={LogIn} message="管理员面板需要登录。" onAction={() => onNavigate("/auth")} title="登录后继续" />;
-  if (account && account.role !== "admin") return <div className="min-h-dvh bg-black"><section className={STUDIO_SECTION_CLASS}><div className={STUDIO_CONTENT_SHELL_CLASS}><StudioSidebar account={account} active="admin" onNavigate={onNavigate} /><div className="flex min-h-[60dvh] items-center justify-center"><div className="max-w-xl"><Lock className="h-8 w-8 text-white" /><h1 className="mt-5 text-3xl font-bold text-white">需要管理员权限</h1><p className="mt-3 text-zinc-400">当前账号无权访问平台运营数据。</p></div></div></div></section></div>;
-
-  const stats = overview ? [
-    ["用户", overview.users, Users], ["站点", overview.sites, FolderKanban], ["公开域名", overview.domains, Database],
-    ["部署", overview.deployments, Activity], ["待审核", overview.pendingReviewSites, ShieldAlert], ["已封禁", overview.blockedSites, Lock],
-  ] as const : [];
+  if (!session) return <RouteMessage actionLabel="登录" icon={Lock} message="管理员面板需要登录。" onAction={() => onNavigate("/auth")} title="登录后继续" />;
+  if (account?.role !== "admin") return <RouteMessage actionLabel="返回工作台" icon={Lock} message="当前账号无权访问平台运营数据。" onAction={() => onNavigate(STUDIO_PATH)} title="需要管理员权限" />;
 
   return <div className="min-h-dvh bg-black"><section className={STUDIO_SECTION_CLASS}><div className={STUDIO_CONTENT_SHELL_CLASS}>
     <StudioSidebar account={account} active="admin" onNavigate={onNavigate} />
     <main className={STUDIO_MAIN_CLASS}>
       <header className={STUDIO_HEADER_CLASS}><div><p className={STUDIO_EYEBROW_CLASS}><Crown className="h-4 w-4" />管理员</p><h1 className={STUDIO_TITLE_CLASS}>平台运营控制台</h1></div><div className="flex gap-2"><button className={STUDIO_SECONDARY_BUTTON_CLASS} disabled={loading} onClick={() => void load(true)} type="button"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />刷新</button><button className={STUDIO_SECONDARY_BUTTON_CLASS} onClick={() => onNavigate(STUDIO_PATH)} type="button"><LayoutDashboard className="h-4 w-4" />工作台</button></div></header>
-      <nav aria-label="管理员视图" className="mt-5 flex gap-1 overflow-x-auto border-b border-white/15">{tabs.map((item) => { const Icon = item.icon; return <button aria-current={tab === item.id ? "page" : undefined} className={cn("flex h-11 shrink-0 cursor-pointer items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors", tab === item.id ? "border-white text-white" : "border-transparent text-zinc-500 hover:text-zinc-200")} key={item.id} onClick={() => setTab(item.id)} type="button"><Icon className="h-4 w-4" />{item.label}</button>; })}</nav>
+      <nav aria-label="管理员视图" className="mt-5 flex gap-1 overflow-x-auto border-b border-white/15">{tabs.map(([id, label, Icon]) => <button aria-current={tab === id ? "page" : undefined} className={cn("flex h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium", tab === id ? "border-white text-white" : "border-transparent text-zinc-500 hover:text-zinc-200")} key={id} onClick={() => setTab(id)} type="button"><Icon className="h-4 w-4" />{label}</button>)}</nav>
       <ToastMessage message={error} />
-      {loading && !overview ? <div className="mt-10 flex items-center justify-center gap-3 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />正在汇总平台数据</div> : null}
-      {overview && tab === "overview" ? <div className="mt-5 space-y-5"><div className={cn(STUDIO_PANEL_CLASS, "grid overflow-hidden sm:grid-cols-2 xl:grid-cols-3")}>{stats.map(([label, value, Icon]) => <div className="border-b border-white/15 p-4 sm:border-r" key={label}><div className="flex items-center justify-between"><span className="text-sm text-zinc-500">{label}</span><Icon className="h-4 w-4 text-zinc-600" /></div><p className="mt-2 text-2xl font-semibold tabular-nums text-white">{value}</p></div>)}</div><div className="grid gap-4 lg:grid-cols-2"><div className={cn(STUDIO_PANEL_CLASS, "p-5")}><p className="text-sm text-zinc-500">有效部署占用</p><p className="mt-2 text-2xl font-semibold text-white">{formatBytes(overview.storageBytes)}</p><p className="mt-2 text-xs leading-5 text-zinc-600">来自数据库元数据汇总，不扫描 R2 对象。</p></div><div className={cn(STUDIO_PANEL_CLASS, "p-5")}><p className="text-sm text-zinc-500">运行策略</p><p className="mt-2 text-sm leading-6 text-zinc-300">按需刷新 · 单次汇总 · 最近 25 条 · 无自动轮询</p><p className="mt-2 text-xs text-zinc-600">管理页不会产生周期性 Worker、KV 或 R2 请求。</p></div></div></div> : null}
-      {overview && tab === "users" ? <DataTable headers={["账号", "加入时间", "角色", "套餐"]}>{overview.recentUsers.map((user) => <tr className="border-b border-white/10 last:border-0" key={user.id}><Cell><span className="block max-w-64 truncate text-zinc-200">{user.email}</span><span className="text-xs text-zinc-600">{user.id.slice(0, 8)}</span></Cell><Cell>{dateTime(user.createdAt)}</Cell><Cell><select aria-label={`${user.email} 的角色`} className={fieldClass} disabled={savingId === user.id} onChange={(event) => void changeUser(user.id, user.email, "role", event.target.value)} value={user.role}><option value="user">用户</option><option value="admin">管理员</option></select></Cell><Cell><input aria-label={`${user.email} 的套餐`} className={cn(fieldClass, "w-28")} defaultValue={user.plan} disabled={savingId === user.id} key={`${user.id}-${user.plan}`} onBlur={(event) => { if (event.target.value !== user.plan) void changeUser(user.id, user.email, "plan", event.target.value); }} /></Cell></tr>)}</DataTable> : null}
-      {overview && tab === "sites" ? <DataTable headers={["站点", "所有者", "更新时间", "状态"]}>{overview.recentSites.map((site) => <tr className="border-b border-white/10 last:border-0" key={site.id}><Cell><span className="block max-w-56 truncate text-zinc-200">{site.name}</span><span className="text-xs text-zinc-600">{site.id.slice(0, 8)}</span></Cell><Cell><span className="block max-w-52 truncate">{site.ownerEmail}</span></Cell><Cell>{dateTime(site.updatedAt)}</Cell><Cell><select aria-label={`${site.name} 的状态`} className={fieldClass} disabled={savingId === site.id} onChange={(event) => void changeSite(site.id, site.name, event.target.value as "draft" | "active" | "pending_review" | "blocked")} value={site.status}><option value="draft">草稿</option><option value="active">正常</option><option value="pending_review">待审核</option><option value="blocked">已封禁</option></select></Cell></tr>)}</DataTable> : null}
-      {overview && tab === "reviews" ? <DataTable headers={["站点 / 版本", "风险", "文件", "体积", "提交时间"]}>{overview.reviewDeployments.map((deployment) => <tr className="border-b border-white/10 last:border-0" key={deployment.id}><Cell><span className="text-zinc-200">{deployment.siteName} · v{deployment.version}</span><span className="block text-xs text-zinc-600">{deployment.status === "blocked" ? "已拦截" : "待审核"}</span></Cell><Cell><span className={cn("font-medium tabular-nums", deployment.riskScore >= 70 ? "text-red-400" : "text-amber-300")}>{deployment.riskScore}</span></Cell><Cell>{deployment.fileCount}</Cell><Cell>{formatBytes(deployment.totalBytes)}</Cell><Cell>{dateTime(deployment.createdAt)}</Cell></tr>)}</DataTable> : null}
-      {overview && tab === "audit" ? <DataTable headers={["事件", "说明", "风险", "时间"]}>{overview.auditEvents.map((event) => <tr className="border-b border-white/10 last:border-0" key={event.id}><Cell><code className="text-xs text-zinc-300">{event.eventType}</code></Cell><Cell><span className="block min-w-64 max-w-xl whitespace-normal leading-5">{event.message}</span></Cell><Cell>{event.riskScore}</Cell><Cell>{dateTime(event.createdAt)}</Cell></tr>)}</DataTable> : null}
+      {loading && !overview ? <div className="mt-10 flex justify-center gap-2 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />正在汇总平台数据</div> : null}
+      {overview && tab === "overview" ? <Overview data={overview} /> : null}
+      {overview && tab === "users" ? <DataTable headers={["账号", "加入时间", "角色", "套餐"]}>{overview.recentUsers.map((user) => <tr className="border-b border-white/10" key={user.id}><Cell><span className="block max-w-64 truncate text-zinc-200">{user.email}</span><span className="text-xs text-zinc-600">{user.id}</span></Cell><Cell>{dateTime(user.createdAt)}</Cell><Cell><select className={fieldClass} onChange={(e) => changeUser(user.id, user.email, "role", e.target.value)} value={user.role}><option value="user">用户</option><option value="admin">管理员</option></select></Cell><Cell><select className={fieldClass} onChange={(e) => changeUser(user.id, user.email, "plan", e.target.value)} value={user.plan}>{overview.plans.filter((plan) => plan.enabled || plan.key === user.plan).map((plan) => <option key={plan.key} value={plan.key}>{plan.label}</option>)}</select></Cell></tr>)}</DataTable> : null}
+      {overview && tab === "projects" ? <DataTable headers={["项目", "所有者", "更新时间", "状态"]}>{overview.recentSites.map((site) => <tr className="border-b border-white/10" key={site.id}><Cell><span className="text-zinc-200">{site.name}</span><span className="block text-xs text-zinc-600">{site.id}</span></Cell><Cell>{site.ownerEmail}</Cell><Cell>{dateTime(site.updatedAt)}</Cell><Cell><select className={fieldClass} onChange={(e) => changeProject(site.id, site.name, e.target.value as any)} value={site.status}>{["draft", "active", "pending_review", "blocked"].map((status) => <option key={status} value={status}>{siteStatusLabels[status]}</option>)}</select></Cell></tr>)}</DataTable> : null}
+      {overview && tab === "domains" ? <div className="mt-5 space-y-4"><div className={cn(STUDIO_PANEL_CLASS, "grid gap-3 p-4 md:grid-cols-[1fr_1fr_180px_auto]")}><select className={fieldClass} onChange={(e) => setDomainForm({ ...domainForm, userId: e.target.value })} value={domainForm.userId}><option value="">选择域名所有者</option>{overview.recentUsers.map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}</select><input className={fieldClass} onChange={(e) => setDomainForm({ ...domainForm, hostname: e.target.value })} placeholder="demo.example.com" value={domainForm.hostname} /><select className={fieldClass} onChange={(e) => setDomainForm({ ...domainForm, type: e.target.value as any })} value={domainForm.type}><option value="platform_subdomain">平台子域名</option><option value="custom_domain">自定义域名</option></select><button className={STUDIO_SECONDARY_BUTTON_CLASS} disabled={!domainForm.userId || !domainForm.hostname} onClick={() => confirm({ title: "确认新增域名", description: `为 ${usersById.get(domainForm.userId)?.email ?? domainForm.userId} 新增 ${domainForm.hostname}。域名初始不绑定项目。`, run: () => createAdminDomain(domainForm) })} type="button"><Plus className="h-4 w-4" />新增</button></div><DataTable headers={["域名", "所有者", "绑定项目", "状态", "操作"]}>{overview.domainsList.map((domain) => <tr className="border-b border-white/10" key={domain.id}><Cell><span className="text-zinc-200">{domain.hostname}</span><span className="block text-xs text-zinc-600">{domain.type === "custom_domain" ? "自定义域名" : "平台子域名"}</span></Cell><Cell>{domain.ownerEmail}</Cell><Cell><select className={cn(fieldClass, "max-w-48")} onChange={(e) => { const siteId = e.target.value || null; const siteName = siteId ? overview.recentSites.find((site) => site.id === siteId)?.name : "未绑定"; confirm({ title: "确认切换域名绑定", description: `将 ${domain.hostname} ${siteId ? `绑定到“${siteName}”` : "解除项目绑定"}。公开访问会立即切换。`, destructive: !siteId, run: () => updateAdminDomain(domain.id, { siteId }) }); }} value={domain.siteId ?? ""}><option value="">未绑定</option>{overview.recentSites.filter((site) => site.ownerEmail === domain.ownerEmail && site.status === "active").map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></Cell><Cell><select className={fieldClass} onChange={(e) => changeDomain(domain.id, domain.hostname, e.target.value as any)} value={domain.status}>{["active", "pending_review", "blocked"].map((status) => <option key={status} value={status}>{siteStatusLabels[status]}</option>)}</select></Cell><Cell><button aria-label={`删除 ${domain.hostname}`} className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-red-500/10 hover:text-red-300" onClick={() => confirm({ title: "永久移除域名", description: `移除 ${domain.hostname} 后会解绑项目并停止访问。该操作不可直接撤销。`, destructive: true, confirmationText: domain.hostname, confirmLabel: "移除域名", run: () => deleteAdminDomain(domain.id) })} type="button"><Trash2 className="h-4 w-4" /></button></Cell></tr>)}</DataTable></div> : null}
+      {overview && tab === "plans" ? <Catalog plans={overview.plans} planDrafts={planDrafts} priceDrafts={priceDrafts} setPlanDrafts={setPlanDrafts} setPriceDrafts={setPriceDrafts} confirm={confirm} /> : null}
+      {overview && tab === "reviews" ? <DataTable headers={["项目 / 版本", "风险", "文件", "体积", "提交时间"]}>{overview.reviewDeployments.map((item) => <tr className="border-b border-white/10" key={item.id}><Cell>{item.siteName} · v{item.version}</Cell><Cell>{item.riskScore}</Cell><Cell>{item.fileCount}</Cell><Cell>{Math.round(item.totalBytes / 1024)} KB</Cell><Cell>{dateTime(item.createdAt)}</Cell></tr>)}</DataTable> : null}
+      {overview && tab === "audit" ? <DataTable headers={["事件", "说明", "风险", "时间"]}>{overview.auditEvents.map((item) => <tr className="border-b border-white/10" key={item.id}><Cell><code>{item.eventType}</code></Cell><Cell>{item.message}</Cell><Cell>{item.riskScore}</Cell><Cell>{dateTime(item.createdAt)}</Cell></tr>)}</DataTable> : null}
     </main>
+    <ConfirmDialog busy={busy} confirmLabel={pending?.confirmLabel} confirmationText={pending?.confirmationText} description={pending?.description ?? ""} destructive={pending?.destructive} onCancel={() => !busy && setPending(null)} onConfirm={() => void execute()} open={Boolean(pending)} title={pending?.title ?? "确认操作"} />
   </div></section></div>;
 }
 
-function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
-  return <div className={cn(STUDIO_PANEL_CLASS, "mt-5 overflow-x-auto")}><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead><tr className="border-b border-white/20 bg-white/[0.03]">{headers.map((header) => <th className="px-4 py-3 font-medium text-zinc-500" key={header}>{header}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
+function Overview({ data }: { data: AdminOverview }) { const stats = [["用户", data.users], ["项目", data.sites], ["独立域名", data.domains], ["部署", data.deployments], ["待审核", data.pendingReviewSites], ["已封禁", data.blockedSites]]; return <div className={cn(STUDIO_PANEL_CLASS, "mt-5 grid overflow-hidden sm:grid-cols-2 xl:grid-cols-3")}>{stats.map(([label, value]) => <div className="border-b border-white/15 p-4 sm:border-r" key={label}><span className="text-sm text-zinc-500">{label}</span><p className="mt-2 text-2xl font-semibold text-white">{value}</p></div>)}</div>; }
+
+function Catalog({ plans, planDrafts, priceDrafts, setPlanDrafts, setPriceDrafts, confirm }: { plans: AdminPlan[]; planDrafts: Record<string, AdminPlan>; priceDrafts: Record<string, AdminDomainPrice>; setPlanDrafts: React.Dispatch<React.SetStateAction<Record<string, AdminPlan>>>; setPriceDrafts: React.Dispatch<React.SetStateAction<Record<string, AdminDomainPrice>>>; confirm: (action: PendingAction) => void }) {
+  const numberFields: Array<[keyof AdminPlan, string]> = [["monthly_price_cents", "月价（分）"], ["max_sites", "项目数"], ["max_public_sites", "公开项目"], ["max_storage_bytes", "存储字节"], ["max_deployments_per_day", "每日部署"], ["max_domains_per_site", "单项目域名"]];
+  const capabilities: Array<[keyof AdminPlan, string]> = [["custom_domain", "自定义域名"], ["password_protection", "密码保护"], ["access_analytics", "访问统计"], ["remove_branding", "移除品牌"], ["rollback", "版本回滚"], ["source_build", "源码构建"]];
+  return <div className="mt-5 space-y-5"><section><h2 className="text-sm font-semibold text-white">套餐配额与权益</h2><div className="mt-3 grid gap-4 xl:grid-cols-3">{plans.map((original) => { const draft = planDrafts[original.key] ?? original; return <div className={cn(STUDIO_PANEL_CLASS, "p-4")} key={original.key}><div className="flex items-center gap-2"><input className={cn(fieldClass, "min-w-0 flex-1")} onChange={(e) => setPlanDrafts((all) => ({ ...all, [original.key]: { ...draft, label: e.target.value } }))} value={draft.label} /><label className="flex items-center gap-2 text-xs text-zinc-400"><input checked={draft.enabled} onChange={(e) => setPlanDrafts((all) => ({ ...all, [original.key]: { ...draft, enabled: e.target.checked } }))} type="checkbox" />启用</label></div><div className="mt-4 grid grid-cols-2 gap-3">{numberFields.map(([key, label]) => <label className="grid gap-1 text-xs text-zinc-500" key={key}>{label}<input className={fieldClass} min="0" onChange={(e) => setPlanDrafts((all) => ({ ...all, [original.key]: { ...draft, [key]: Number(e.target.value) } }))} type="number" value={draft[key] as number} /></label>)}</div><div className="mt-4 grid grid-cols-2 gap-2">{capabilities.map(([key, label]) => <label className="flex items-center gap-2 text-xs text-zinc-400" key={key}><input checked={draft[key] as boolean} onChange={(e) => setPlanDrafts((all) => ({ ...all, [original.key]: { ...draft, [key]: e.target.checked } }))} type="checkbox" />{label}</label>)}</div><button className={cn(STUDIO_SECONDARY_BUTTON_CLASS, "mt-4 w-full")} onClick={() => confirm({ title: "确认更新套餐", description: `保存“${draft.label}”的价格、配额和权益。现有用户会按新规则使用服务。`, run: () => updateAdminPlan(original.key, draft) })} type="button"><Save className="h-4 w-4" />保存套餐</button></div>; })}</div></section><section><h2 className="text-sm font-semibold text-white">域名定价</h2><div className="mt-3 grid gap-4 md:grid-cols-2">{Object.values(priceDrafts).map((draft) => <div className={cn(STUDIO_PANEL_CLASS, "grid gap-3 p-4 sm:grid-cols-[1fr_130px_130px_auto]")} key={draft.domain_type}><input className={fieldClass} onChange={(e) => setPriceDrafts((all) => ({ ...all, [draft.domain_type]: { ...draft, label: e.target.value } }))} value={draft.label} /><input className={fieldClass} min="0" onChange={(e) => setPriceDrafts((all) => ({ ...all, [draft.domain_type]: { ...draft, price_cents: Number(e.target.value) } }))} type="number" value={draft.price_cents} /><select className={fieldClass} onChange={(e) => setPriceDrafts((all) => ({ ...all, [draft.domain_type]: { ...draft, billing_period: e.target.value as any } }))} value={draft.billing_period}><option value="month">每月</option><option value="year">每年</option><option value="one_time">一次性</option></select><button aria-label={`保存 ${draft.label} 定价`} className={STUDIO_SECONDARY_BUTTON_CLASS} onClick={() => confirm({ title: "确认修改域名定价", description: `将“${draft.label}”价格调整为 ¥${(draft.price_cents / 100).toFixed(2)}。`, run: () => updateAdminDomainPrice(draft.domain_type, draft) })} type="button"><Save className="h-4 w-4" /></button></div>)}</div></section></div>;
 }
+function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) { return <div className={cn(STUDIO_PANEL_CLASS, "mt-5 overflow-x-auto")}><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead><tr className="border-b border-white/20 bg-white/[0.03]">{headers.map((header) => <th className="px-4 py-3 font-medium text-zinc-500" key={header}>{header}</th>)}</tr></thead><tbody>{children}</tbody></table></div>; }
 function Cell({ children }: { children: React.ReactNode }) { return <td className="px-4 py-3 text-zinc-400">{children}</td>; }

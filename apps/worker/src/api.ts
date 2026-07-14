@@ -25,6 +25,11 @@ import {
   switchPublicSlot,
   updateAdminSite,
   updateAdminUser,
+  createAdminDomain,
+  updateAdminDomain,
+  deleteAdminDomain,
+  updateAdminPlan,
+  updateAdminDomainPrice,
   updateProjectName,
   signUpWithEmailPassword,
 } from "./state";
@@ -54,6 +59,7 @@ type SignUpInput = {
 
 type AdminUserUpdateInput = { role?: "user" | "admin"; plan?: string };
 type AdminSiteUpdateInput = { status?: "draft" | "active" | "pending_review" | "blocked" };
+type AdminDomainInput = { userId?: string; hostname?: string; type?: "platform_subdomain" | "custom_domain"; siteId?: string | null };
 
 const subdomainCheckWindows = new Map<
   string,
@@ -193,6 +199,38 @@ export async function handleApi(request: Request, env: Env) {
       const input = await readJson<AdminSiteUpdateInput>(request);
       if (!input.status) return problem("请选择站点状态", 400);
       return json(await updateAdminSite(env, user, { siteId: decodeURIComponent(adminSiteMatch[1] ?? ""), status: input.status }));
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/admin/domains") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<AdminDomainInput>(request);
+      if (!input.userId || !input.hostname || !input.type) return problem("请填写用户、域名和类型", 400);
+      return json(await createAdminDomain(env, user, { userId: input.userId, hostname: input.hostname, type: input.type, siteId: input.siteId }), { status: 201 });
+    }
+    const adminDomainMatch = url.pathname.match(/^\/api\/admin\/domains\/([^/]+)$/);
+    if (adminDomainMatch && request.method === "PATCH") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<{ status?: "active" | "pending_review" | "blocked"; siteId?: string | null }>(request);
+      return json(await updateAdminDomain(env, user, { domainId: decodeURIComponent(adminDomainMatch[1] ?? ""), ...input }));
+    }
+    if (adminDomainMatch && request.method === "DELETE") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await deleteAdminDomain(env, user, decodeURIComponent(adminDomainMatch[1] ?? "")));
+    }
+    const adminPlanMatch = url.pathname.match(/^\/api\/admin\/plans\/([^/]+)$/);
+    if (adminPlanMatch && request.method === "PATCH") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await updateAdminPlan(env, user, decodeURIComponent(adminPlanMatch[1] ?? ""), await readJson(request)));
+    }
+    const adminPriceMatch = url.pathname.match(/^\/api\/admin\/domain-pricing\/(platform_subdomain|custom_domain)$/);
+    if (adminPriceMatch && request.method === "PATCH") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await updateAdminDomainPrice(env, user, adminPriceMatch[1] as "platform_subdomain" | "custom_domain", await readJson(request)));
     }
 
     if (request.method === "GET" && url.pathname === "/api/subdomains/check") {

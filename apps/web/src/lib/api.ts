@@ -190,7 +190,13 @@ export type AdminOverview = {
   recentSites: Array<{ id: string; name: string; ownerEmail: string; status: "draft" | "active" | "pending_review" | "blocked" | "deleted"; createdAt: string; updatedAt: string }>;
   reviewDeployments: Array<{ id: string; siteId: string; siteName: string; version: number; status: DeploymentSummary["status"]; riskScore: number; fileCount: number; totalBytes: number; createdAt: string }>;
   auditEvents: Array<{ id: string; eventType: string; message: string; riskScore: number; createdAt: string }>;
+  domainsList: AdminDomain[];
+  plans: AdminPlan[];
+  domainPricing: AdminDomainPrice[];
 };
+export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
+export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
+export type AdminDomainPrice = { domain_type: "platform_subdomain" | "custom_domain"; label: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
 
 const ADMIN_OVERVIEW_CACHE_MS = 30_000;
 let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
@@ -241,6 +247,12 @@ export async function updateAdminSite(siteId: string, status: "draft" | "active"
   adminOverviewCache = null;
   return result;
 }
+async function adminMutation<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) { const result = await request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) }); adminOverviewCache = null; return result; }
+export const createAdminDomain = (input: { userId: string; hostname: string; type: "platform_subdomain" | "custom_domain"; siteId?: string | null }) => adminMutation("/api/admin/domains", "POST", input);
+export const updateAdminDomain = (id: string, input: { status?: "active" | "pending_review" | "blocked"; siteId?: string | null }) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "PATCH", input);
+export const deleteAdminDomain = (id: string) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "DELETE");
+export const updateAdminPlan = (key: string, input: Partial<AdminPlan>) => adminMutation(`/api/admin/plans/${encodeURIComponent(key)}`, "PATCH", input);
+export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], input: Partial<AdminDomainPrice>) => adminMutation(`/api/admin/domain-pricing/${type}`, "PATCH", input);
 
 export async function checkSubdomain(subdomain: string) {
   const normalized = subdomain.trim().toLowerCase();

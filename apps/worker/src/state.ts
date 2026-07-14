@@ -151,7 +151,14 @@ export type AdminOverview = {
     riskScore: number;
     createdAt: string;
   }>;
+  domainsList: AdminDomain[];
+  plans: AdminPlan[];
+  domainPricing: AdminDomainPrice[];
 };
+
+export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
+export type AdminPlan = Database["public"]["Tables"]["plan_catalog"]["Row"];
+export type AdminDomainPrice = Database["public"]["Tables"]["domain_pricing"]["Row"];
 
 export type SignUpConfirmationResult = {
   email: string;
@@ -928,13 +935,38 @@ export async function getAdminOverview(
   });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("无法读取管理员数据");
-  return data as unknown as AdminOverview;
+  const [{ data: domains, error: domainsError }, { data: plans, error: plansError }, { data: pricing, error: pricingError }] = await Promise.all([
+    (supabase as any).from("domains").select("id, user_id, site_id, hostname, type, status, created_at, profiles(email), sites(name)").neq("status", "deleted").order("created_at", { ascending: false }).limit(100),
+    supabase.from("plan_catalog").select("*").order("monthly_price_cents"),
+    supabase.from("domain_pricing").select("*").order("domain_type"),
+  ]);
+  if (domainsError || plansError || pricingError) throw new Error((domainsError ?? plansError ?? pricingError)!.message);
+  const base = data as unknown as Omit<AdminOverview, "domainsList" | "plans" | "domainPricing">;
+  return { ...base, domainsList: (domains ?? []).map((domain: any) => ({ id: domain.id, userId: domain.user_id, ownerEmail: domain.profiles?.email ?? "未知用户", siteId: domain.site_id, siteName: domain.sites?.name ?? null, hostname: domain.hostname, type: domain.type, status: domain.status, createdAt: domain.created_at })), plans: plans ?? [], domainPricing: pricing ?? [] };
 }
 
 async function requireAdmin(env: Env, user: AuthenticatedUser) {
   const account = await getAccountProfile(env, user);
   if (account.role !== "admin") throw new Error("需要管理员权限");
   return createServiceSupabase(env);
+}
+
+async function getEffectivePlanConfig(env: Env, planKey: string | null | undefined) {
+  const fallback = getPlanConfig(planKey);
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await supabase.from("plan_catalog").select("*").eq("key", planKey ?? "free").eq("enabled", true).maybeSingle();
+  if (error || !data) return fallback;
+  return {
+    ...fallback,
+    label: data.label,
+    enabled: data.enabled,
+    quotas: {
+      ...fallback.quotas,
+      user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day },
+      site: { ...fallback.quotas.site, maxDomainsPerSite: data.max_domains_per_site },
+    },
+    capabilities: { customDomain: data.custom_domain, passwordProtection: data.password_protection, accessAnalytics: data.access_analytics, removeBranding: data.remove_branding, rollback: data.rollback, sourceBuild: data.source_build },
+  };
 }
 
 export async function updateAdminUser(env: Env, user: AuthenticatedUser, input: { userId: string; role?: ProfileRole; plan?: string }) {
@@ -969,6 +1001,66 @@ export async function updateAdminSite(env: Env, user: AuthenticatedUser, input: 
   return { id: data.id, name: data.name, status: data.status };
 }
 
+export async function createAdminDomain(env: Env, user: AuthenticatedUser, input: { userId: string; hostname: string; type: "platform_subdomain" | "custom_domain"; siteId?: string | null }) {
+  const supabase = await requireAdmin(env, user);
+  const hostname = input.hostname.trim().toLowerCase();
+  if (!hostname || !hostname.includes(".")) throw new Error("请输入完整域名");
+  if (input.siteId) {
+    const { data: site } = await supabase.from("sites").select("id, user_id").eq("id", input.siteId).eq("user_id", input.userId).neq("status", "deleted").maybeSingle();
+    if (!site) throw new Error("项目不存在或不属于该用户");
+  }
+  const { data, error } = await supabase.from("domains").insert({ user_id: input.userId, site_id: input.siteId ?? null, hostname, type: input.type, status: "active" }).select("id, user_id, site_id, hostname, type, status, created_at").single();
+  if (error?.code === "23505") throw new Error("该域名已存在");
+  if (error || !data) throw new Error(error?.message ?? "域名创建失败");
+  await supabase.from("audit_events").insert({ user_id: user.id, site_id: input.siteId ?? null, event_type: "admin.domain.created", message: `管理员新增域名 ${hostname}` });
+  return data;
+}
+
+export async function updateAdminDomain(env: Env, user: AuthenticatedUser, input: { domainId: string; status?: "active" | "pending_review" | "blocked"; siteId?: string | null }) {
+  const supabase = await requireAdmin(env, user);
+  const { data: current } = await supabase.from("domains").select("hostname, user_id, site_id").eq("id", input.domainId).neq("status", "deleted").single();
+  if (!current) throw new Error("域名不存在");
+  if (input.siteId) {
+    const { data: site } = await supabase.from("sites").select("id").eq("id", input.siteId).eq("user_id", current.user_id).neq("status", "deleted").maybeSingle();
+    if (!site) throw new Error("只能绑定该域名所有者的项目");
+  }
+  const update: Database["public"]["Tables"]["domains"]["Update"] = {};
+  if (input.status) update.status = input.status;
+  if (input.siteId !== undefined) { update.site_id = input.siteId; update.last_binding_change_at = new Date().toISOString(); }
+  const { data, error } = await supabase.from("domains").update(update).eq("id", input.domainId).select("id, hostname, status, site_id").single();
+  if (error) throw new Error(error.message);
+  await deleteDomainCache(env, current.hostname.split(".")[0] ?? current.hostname);
+  await supabase.from("audit_events").insert({ user_id: user.id, site_id: input.siteId ?? current.site_id, event_type: "admin.domain.updated", message: `管理员更新域名 ${current.hostname}` });
+  return data;
+}
+
+export async function deleteAdminDomain(env: Env, user: AuthenticatedUser, domainId: string) {
+  const supabase = await requireAdmin(env, user);
+  const { data, error } = await supabase.from("domains").update({ status: "deleted", site_id: null }).eq("id", domainId).neq("status", "deleted").select("id, hostname").single();
+  if (error || !data) throw new Error(error?.message ?? "域名不存在");
+  await deleteDomainCache(env, data.hostname.split(".")[0] ?? data.hostname);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain.deleted", message: `管理员删除域名 ${data.hostname}` });
+  return { id: data.id };
+}
+
+export async function updateAdminPlan(env: Env, user: AuthenticatedUser, key: string, update: Database["public"]["Tables"]["plan_catalog"]["Update"]) {
+  const supabase = await requireAdmin(env, user);
+  delete update.key;
+  const { data, error } = await supabase.from("plan_catalog").update({ ...update, updated_at: new Date().toISOString() }).eq("key", key).select("*").single();
+  if (error) throw new Error(error.message);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.plan.updated", message: `管理员更新套餐 ${key}` });
+  return data;
+}
+
+export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, type: "platform_subdomain" | "custom_domain", update: Database["public"]["Tables"]["domain_pricing"]["Update"]) {
+  const supabase = await requireAdmin(env, user);
+  delete update.domain_type;
+  const { data, error } = await supabase.from("domain_pricing").update({ ...update, updated_at: new Date().toISOString() }).eq("domain_type", type).select("*").single();
+  if (error) throw new Error(error.message);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.updated", message: `管理员更新域名定价 ${type}` });
+  return data;
+}
+
 async function getUserPlan(env: Env, user: AuthenticatedUser) {
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
@@ -986,7 +1078,7 @@ async function getUserPlan(env: Env, user: AuthenticatedUser) {
 
 async function assertSiteQuota(env: Env, user: AuthenticatedUser) {
   const supabase = createServiceSupabase(env);
-  const plan = getPlanConfig(await getUserPlan(env, user));
+  const plan = await getEffectivePlanConfig(env, await getUserPlan(env, user));
   const { count, error } = await supabase
     .from("sites")
     .select("id", { count: "exact", head: true })
@@ -1004,7 +1096,7 @@ async function assertSiteQuota(env: Env, user: AuthenticatedUser) {
 
 async function assertUploadSessionQuota(env: Env, user: AuthenticatedUser) {
   const supabase = createServiceSupabase(env);
-  const plan = getPlanConfig(await getUserPlan(env, user));
+  const plan = await getEffectivePlanConfig(env, await getUserPlan(env, user));
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const siteIds = await listUserSiteIds(env, user);
@@ -1071,7 +1163,7 @@ async function assertStorageQuota(
   nextDeploymentBytes: number,
 ) {
   const supabase = createServiceSupabase(env);
-  const plan = getPlanConfig(await getUserPlan(env, user));
+  const plan = await getEffectivePlanConfig(env, await getUserPlan(env, user));
   const siteIds = await listUserSiteIds(env, user);
   const [{ data, error }, { data: replacingSite, error: siteError }] =
     await Promise.all([
@@ -1418,7 +1510,7 @@ export async function createPublicSlot(
   const availability = await checkSubdomainAvailability(env, input.subdomain);
   if (!availability.available)
     throw new Error(availability.reason ?? "公开地址不可用");
-  const plan = getPlanConfig(await getUserPlan(env, input.user));
+  const plan = await getEffectivePlanConfig(env, await getUserPlan(env, input.user));
   const supabase = createServiceSupabase(env);
   const { count, error: countError } = await supabase
     .from("domains")
