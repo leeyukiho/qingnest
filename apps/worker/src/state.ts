@@ -795,6 +795,7 @@ function invalidateSubdomainAvailability(subdomain: string) {
 export async function checkSubdomainAvailability(
   env: Env,
   subdomain: string,
+  hostnameSuffix?: string,
 ): Promise<SubdomainAvailability> {
   const validation = validateSubdomain(subdomain);
 
@@ -806,7 +807,13 @@ export async function checkSubdomainAvailability(
     };
   }
 
-  const hostname = getDistributionHostname(env, validation.normalized);
+  const suffix = hostnameSuffix?.trim().toLowerCase().replace(/^\.+/, "");
+  if (suffix && hasServiceSupabase(env)) {
+    const supabase = createServiceSupabase(env);
+    const { data } = await supabase.from("domain_pricing").select("hostname_suffix").eq("hostname_suffix", suffix).eq("enabled", true).maybeSingle();
+    if (!data) return { available: false, normalized: validation.normalized, reason: "该平台域名暂不可选" };
+  }
+  const hostname = suffix ? `${validation.normalized}.${suffix}` : getDistributionHostname(env, validation.normalized);
   const cached = subdomainAvailabilityCache.get(hostname);
   if (cached && cached.expiresAt > Date.now()) return cached.request;
 
@@ -826,7 +833,7 @@ export async function checkSubdomainAvailability(
       available: !existing,
       normalized: validation.normalized,
       requiresReview: validation.requiresReview,
-      publicUrl: getSiteUrl(env, validation.normalized),
+      publicUrl: getPublicUrlFromHostname(env, hostname),
       reason: existing ? "这个子域名已被占用" : undefined,
       hostname,
     };
@@ -1052,13 +1059,32 @@ export async function updateAdminPlan(env: Env, user: AuthenticatedUser, key: st
   return data;
 }
 
-export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, type: "platform_subdomain" | "custom_domain", update: Database["public"]["Tables"]["domain_pricing"]["Update"]) {
+export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, type: string, update: Database["public"]["Tables"]["domain_pricing"]["Update"]) {
   const supabase = await requireAdmin(env, user);
   delete update.domain_type;
   const { data, error } = await supabase.from("domain_pricing").update({ ...update, updated_at: new Date().toISOString() }).eq("domain_type", type).select("*").single();
   if (error) throw new Error(error.message);
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.updated", message: `管理员更新域名定价 ${type}` });
   return data;
+}
+
+export async function createAdminDomainPrice(env: Env, user: AuthenticatedUser, input: Database["public"]["Tables"]["domain_pricing"]["Insert"]) {
+  const supabase = await requireAdmin(env, user);
+  const suffix = input.hostname_suffix.trim().toLowerCase().replace(/^\.+/, "");
+  if (!suffix.includes(".")) throw new Error("请输入完整的平台域名后缀");
+  const key = input.domain_type.trim().toLowerCase();
+  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, hostname_suffix: suffix }).select("*").single();
+  if (error) throw new Error(error.code === "23505" ? "该平台域名已存在" : error.message);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.created", message: `管理员新增平台域名 ${suffix}` });
+  return data;
+}
+
+export async function deleteAdminDomainPrice(env: Env, user: AuthenticatedUser, type: string) {
+  const supabase = await requireAdmin(env, user);
+  const { data, error } = await supabase.from("domain_pricing").delete().eq("domain_type", type).select("hostname_suffix").single();
+  if (error) throw new Error(error.message);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.deleted", message: `管理员移除平台域名 ${data.hostname_suffix}` });
+  return { domain_type: type };
 }
 
 async function getUserPlan(env: Env, user: AuthenticatedUser) {
@@ -1551,9 +1577,9 @@ export async function createPublicSlot(
 
 export async function rentPublicSlot(
   env: Env,
-  input: { subdomain: string; user: AuthenticatedUser },
+  input: { subdomain: string; hostnameSuffix?: string; user: AuthenticatedUser },
 ) {
-  const availability = await checkSubdomainAvailability(env, input.subdomain);
+  const availability = await checkSubdomainAvailability(env, input.subdomain, input.hostnameSuffix);
   if (!availability.available)
     throw new Error(availability.reason ?? "公开地址不可用");
 
@@ -1587,6 +1613,15 @@ export async function rentPublicSlot(
   return (await listPublicSlots(env, input.user)).find(
     (slot) => slot.id === domain.id,
   )!;
+}
+
+export async function listPlatformDomainCatalog(env: Env) {
+  const fallback = getWorkerPlatformConfig(env).domains.distributionRoot;
+  if (!hasServiceSupabase(env)) return [{ domain_type: "platform_subdomain", label: fallback, hostname_suffix: fallback, price_cents: 990, billing_period: "year", enabled: true }];
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, enabled").eq("enabled", true).order("price_cents");
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 export async function switchPublicSlot(

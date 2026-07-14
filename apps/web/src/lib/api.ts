@@ -196,7 +196,7 @@ export type AdminOverview = {
 };
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
 export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
-export type AdminDomainPrice = { domain_type: "platform_subdomain" | "custom_domain"; label: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
+export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
 
 const ADMIN_OVERVIEW_CACHE_MS = 30_000;
 let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
@@ -248,15 +248,21 @@ export async function updateAdminSite(siteId: string, status: "draft" | "active"
   return result;
 }
 async function adminMutation<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) { const result = await request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) }); adminOverviewCache = null; return result; }
-export const createAdminDomain = (input: { userId: string; hostname: string; type: "platform_subdomain" | "custom_domain"; siteId?: string | null }) => adminMutation("/api/admin/domains", "POST", input);
+export const createAdminDomain = (input: { userId: string; hostname: string; type: "platform_subdomain"; siteId?: string | null }) => adminMutation("/api/admin/domains", "POST", input);
 export const updateAdminDomain = (id: string, input: { status?: "active" | "pending_review" | "blocked"; siteId?: string | null }) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "PATCH", input);
 export const deleteAdminDomain = (id: string) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "DELETE");
 export const updateAdminPlan = (key: string, input: Partial<AdminPlan>) => adminMutation(`/api/admin/plans/${encodeURIComponent(key)}`, "PATCH", input);
-export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], input: Partial<AdminDomainPrice>) => adminMutation(`/api/admin/domain-pricing/${type}`, "PATCH", input);
+export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], input: Partial<AdminDomainPrice>) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "PATCH", input);
+export const createAdminDomainPrice = (input: Omit<AdminDomainPrice, "updated_at">) => adminMutation("/api/admin/domain-pricing", "POST", input);
+export const deleteAdminDomainPrice = (type: string) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "DELETE");
 
-export async function checkSubdomain(subdomain: string) {
+export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "enabled">;
+export const getPlatformDomainCatalog = () => request<PlatformDomainOption[]>("/api/domain-catalog");
+
+export async function checkSubdomain(subdomain: string, hostnameSuffix?: string) {
   const normalized = subdomain.trim().toLowerCase();
-  const cached = subdomainCheckCache.get(normalized);
+  const cacheKey = `${normalized}.${hostnameSuffix ?? ""}`;
+  const cached = subdomainCheckCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.request;
 
   if (subdomainCheckCache.size >= 100) {
@@ -265,12 +271,13 @@ export async function checkSubdomain(subdomain: string) {
   }
 
   const params = new URLSearchParams({ subdomain: normalized });
+  if (hostnameSuffix) params.set("suffix", hostnameSuffix);
   const pending = request<SubdomainCheck>(`/api/subdomains/check?${params}`);
-  subdomainCheckCache.set(normalized, {
+  subdomainCheckCache.set(cacheKey, {
     expiresAt: Date.now() + 15_000,
     request: pending,
   });
-  pending.catch(() => subdomainCheckCache.delete(normalized));
+  pending.catch(() => subdomainCheckCache.delete(cacheKey));
   return pending;
 }
 
@@ -335,10 +342,10 @@ export async function createPublicSlot(input: {
   return slot;
 }
 
-export async function rentPublicSlot(subdomain: string) {
+export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string) {
   const slot = await request<PublicSlot>("/api/public-slots/rent", {
     method: "POST",
-    body: JSON.stringify({ subdomain }),
+    body: JSON.stringify({ subdomain, hostnameSuffix }),
   });
   publicSlotsCache = null;
   publicSlotsCachedAt = 0;

@@ -246,8 +246,8 @@ export type Database = {
         Relationships: EmptyRelationships;
       };
       domain_pricing: {
-        Row: { domain_type: "platform_subdomain" | "custom_domain"; label: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
-        Insert: { domain_type: "platform_subdomain" | "custom_domain"; label: string; price_cents?: number; billing_period: "month" | "year" | "one_time"; enabled?: boolean; updated_at?: string };
+        Row: { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
+        Insert: { domain_type: string; label: string; hostname_suffix: string; price_cents?: number; billing_period: "month" | "year" | "one_time"; enabled?: boolean; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["domain_pricing"]["Insert"]>;
         Relationships: EmptyRelationships;
       };

@@ -22,6 +22,7 @@ import {
   listProjects,
   listPublicSlots,
   rentPublicSlot,
+  listPlatformDomainCatalog,
   switchPublicSlot,
   updateAdminSite,
   updateAdminUser,
@@ -30,6 +31,8 @@ import {
   deleteAdminDomain,
   updateAdminPlan,
   updateAdminDomainPrice,
+  createAdminDomainPrice,
+  deleteAdminDomainPrice,
   updateProjectName,
   signUpWithEmailPassword,
 } from "./state";
@@ -41,7 +44,7 @@ type SiteCreateInput = {
 };
 
 type PublicSlotInput = { siteId?: string; subdomain?: string };
-type PublicSlotRentalInput = { subdomain?: string };
+type PublicSlotRentalInput = { subdomain?: string; hostnameSuffix?: string };
 type PublicSlotUpdateInput = { siteId?: string | null };
 
 type SiteUpdateInput = { name?: string };
@@ -226,11 +229,21 @@ export async function handleApi(request: Request, env: Env) {
       if (!user) return problem("请先登录", 401);
       return json(await updateAdminPlan(env, user, decodeURIComponent(adminPlanMatch[1] ?? ""), await readJson(request)));
     }
-    const adminPriceMatch = url.pathname.match(/^\/api\/admin\/domain-pricing\/(platform_subdomain|custom_domain)$/);
+    if (url.pathname === "/api/admin/domain-pricing" && request.method === "POST") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await createAdminDomainPrice(env, user, await readJson(request)));
+    }
+    const adminPriceMatch = url.pathname.match(/^\/api\/admin\/domain-pricing\/([^/]+)$/);
     if (adminPriceMatch && request.method === "PATCH") {
       const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
       if (!user) return problem("请先登录", 401);
-      return json(await updateAdminDomainPrice(env, user, adminPriceMatch[1] as "platform_subdomain" | "custom_domain", await readJson(request)));
+      return json(await updateAdminDomainPrice(env, user, decodeURIComponent(adminPriceMatch[1] ?? ""), await readJson(request)));
+    }
+    if (adminPriceMatch && request.method === "DELETE") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await deleteAdminDomainPrice(env, user, decodeURIComponent(adminPriceMatch[1] ?? "")));
     }
 
     if (request.method === "GET" && url.pathname === "/api/subdomains/check") {
@@ -241,6 +254,7 @@ export async function handleApi(request: Request, env: Env) {
         return response;
       }
       const subdomain = url.searchParams.get("subdomain") ?? "";
+      const hostnameSuffix = url.searchParams.get("suffix") ?? undefined;
       const validation = validateSubdomain(subdomain);
 
       if (!validation.ok) {
@@ -254,20 +268,22 @@ export async function handleApi(request: Request, env: Env) {
       const result = await checkSubdomainAvailability(
         env,
         validation.normalized,
+        hostnameSuffix,
       );
       return json(
         {
           available: result.available,
           normalized: result.normalized,
           requiresReview: result.requiresReview,
-          publicUrl: getPublicSiteUrl(
-            result.normalized,
-            platformConfig.domains,
-          ),
+          publicUrl: result.publicUrl ?? getPublicSiteUrl(result.normalized, platformConfig.domains),
           reason: result.reason,
         },
         { headers: { "cache-control": "private, max-age=15" } },
       );
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/domain-catalog") {
+      return json(await listPlatformDomainCatalog(env), { headers: { "cache-control": "public, max-age=60" } });
     }
 
     if (request.method === "POST" && url.pathname === "/api/sites") {
@@ -319,6 +335,7 @@ export async function handleApi(request: Request, env: Env) {
       return json(
         await rentPublicSlot(env, {
           subdomain: input.subdomain,
+          hostnameSuffix: input.hostnameSuffix,
           user,
         }),
         { status: 201 },
