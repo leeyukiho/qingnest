@@ -119,6 +119,45 @@ export type AccountProfile = {
   };
 };
 
+const ACCOUNT_CHANGED_EVENT = "kuaipage:account-changed";
+const READ_CACHE_TTL_MS = 60 * 1000;
+let projectsCache: ProjectSummary[] | null = null;
+let projectsCachedAt = 0;
+const projectCache = new Map<string, ProjectDetail>();
+const projectCachedAt = new Map<string, number>();
+let publicSlotsCache: PublicSlot[] | null = null;
+let publicSlotsCachedAt = 0;
+
+function notifyAccountChanged() {
+  window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT));
+}
+
+function updateProjectCaches(project: ProjectDetail) {
+  projectCache.set(project.id, project);
+  projectCachedAt.set(project.id, Date.now());
+  if (projectsCache) {
+    const summary: ProjectSummary = project;
+    projectsCache = [summary, ...projectsCache.filter((item) => item.id !== project.id)];
+  }
+}
+
+export function getCachedProjects() {
+  return projectsCache;
+}
+
+export function getCachedProject(siteId: string) {
+  return projectCache.get(siteId) ?? null;
+}
+
+export function getCachedPublicSlots() {
+  return publicSlotsCache;
+}
+
+export function subscribeToAccountChanges(listener: () => void) {
+  window.addEventListener(ACCOUNT_CHANGED_EVENT, listener);
+  return () => window.removeEventListener(ACCOUNT_CHANGED_EVENT, listener);
+}
+
 export type AdminOverview = {
   users: number;
   sites: number;
@@ -163,10 +202,15 @@ export async function checkSubdomain(subdomain: string) {
 }
 
 export async function createSite(input: { name: string }) {
-  return request<SiteDraft>("/api/sites", {
+  const site = await request<SiteDraft>("/api/sites", {
     method: "POST",
     body: JSON.stringify(input)
   });
+  const now = new Date().toISOString();
+  projectsCache = [{ ...site, createdAt: now, updatedAt: now }, ...(projectsCache ?? [])];
+  projectsCachedAt = Date.now();
+  notifyAccountChanged();
+  return site;
 }
 
 export type PublicSlot = {
@@ -179,15 +223,40 @@ export type PublicSlot = {
 };
 
 export async function listPublicSlots() {
-  return request<PublicSlot[]>("/api/public-slots");
+  if (publicSlotsCache && Date.now() - publicSlotsCachedAt < READ_CACHE_TTL_MS) return publicSlotsCache;
+  const slots = await request<PublicSlot[]>("/api/public-slots");
+  publicSlotsCache = slots;
+  publicSlotsCachedAt = Date.now();
+  return slots;
 }
 
 export async function createPublicSlot(input: { siteId: string; subdomain: string }) {
-  return request<PublicSlot>("/api/public-slots", { method: "POST", body: JSON.stringify(input) });
+  const slot = await request<PublicSlot>("/api/public-slots", { method: "POST", body: JSON.stringify(input) });
+  publicSlotsCache = null;
+  publicSlotsCachedAt = 0;
+  if (projectsCache) projectsCache = projectsCache.map((project) => project.id === input.siteId ? { ...project, subdomain: slot.hostname.split(".")[0] ?? slot.hostname, publicUrl: slot.publicUrl, visibility: "public" } : project);
+  projectCache.delete(input.siteId);
+  projectCachedAt.delete(input.siteId);
+  notifyAccountChanged();
+  return slot;
 }
 
 export async function switchPublicSlot(slotId: string, siteId: string | null) {
-  return request<PublicSlot>(`/api/public-slots/${encodeURIComponent(slotId)}`, { method: "PATCH", body: JSON.stringify({ siteId }) });
+  const previousSiteId = publicSlotsCache?.find((slot) => slot.id === slotId)?.siteId;
+  const slot = await request<PublicSlot>(`/api/public-slots/${encodeURIComponent(slotId)}`, { method: "PATCH", body: JSON.stringify({ siteId }) });
+  publicSlotsCache = null;
+  publicSlotsCachedAt = 0;
+  if (projectsCache) {
+    projectsCache = projectsCache.map((project) => {
+      if (project.id === previousSiteId && previousSiteId !== siteId) return { ...project, subdomain: "", publicUrl: "", visibility: "private" };
+      if (project.id === siteId) return { ...project, subdomain: slot.hostname.split(".")[0] ?? slot.hostname, publicUrl: slot.publicUrl, visibility: "public" };
+      return project;
+    });
+  }
+  if (previousSiteId) { projectCache.delete(previousSiteId); projectCachedAt.delete(previousSiteId); }
+  if (siteId) { projectCache.delete(siteId); projectCachedAt.delete(siteId); }
+  notifyAccountChanged();
+  return slot;
 }
 
 export async function createPrivatePreview(siteId: string) {
@@ -195,18 +264,28 @@ export async function createPrivatePreview(siteId: string) {
 }
 
 export async function listProjects() {
-  return request<ProjectSummary[]>("/api/sites");
+  if (projectsCache && Date.now() - projectsCachedAt < READ_CACHE_TTL_MS) return projectsCache;
+  const projects = await request<ProjectSummary[]>("/api/sites");
+  projectsCache = projects;
+  projectsCachedAt = Date.now();
+  return projects;
 }
 
 export async function getProject(siteId: string) {
-  return request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`);
+  const cached = projectCache.get(siteId);
+  if (cached && Date.now() - (projectCachedAt.get(siteId) ?? 0) < READ_CACHE_TTL_MS) return cached;
+  const project = await request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`);
+  updateProjectCaches(project);
+  return project;
 }
 
 export async function updateProject(siteId: string, input: { name: string }) {
-  return request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`, {
+  const project = await request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`, {
     method: "PATCH",
     body: JSON.stringify(input)
   });
+  updateProjectCaches(project);
+  return project;
 }
 
 export async function createUploadSession(input: {
@@ -232,10 +311,14 @@ export async function uploadArchive(input: {
   formData.append("deploymentId", input.deploymentId);
   formData.append("archive", input.archive);
 
-  return formRequest<UploadArchiveResult>(
+  const result = await formRequest<UploadArchiveResult>(
     `/api/upload-sessions/${encodeURIComponent(input.uploadSessionId)}/archive`,
     formData
   );
+  projectCache.clear();
+  projectCachedAt.clear();
+  notifyAccountChanged();
+  return result;
 }
 
 export async function uploadFiles(input: {
@@ -251,10 +334,14 @@ export async function uploadFiles(input: {
     formData.append("paths", item.path);
   }
 
-  return formRequest<UploadArchiveResult>(
+  const result = await formRequest<UploadArchiveResult>(
     `/api/upload-sessions/${encodeURIComponent(input.uploadSessionId)}/files`,
     formData
   );
+  projectCache.clear();
+  projectCachedAt.clear();
+  notifyAccountChanged();
+  return result;
 }
 
 

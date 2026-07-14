@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { AlertCircle, CheckCircle2, ExternalLink, Eye, File, FolderTree, Globe2, Link2, Loader2, Lock, Save, UploadCloud } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, ChevronLeft, ExternalLink, Eye, File, FolderTree, Globe2, Link2, Loader2, Lock, Save, UploadCloud } from "lucide-react";
 import { getPlanConfig, validateSubdomain } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { formatBytes, getStatusLabel, hasBlockingScanIssues } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
 import { FileUpload } from "@/components/ui/file-upload";
-import { createPrivatePreview, createPublicSlot, createUploadSession, getProject, listPublicSlots, switchPublicSlot, updateProject, uploadArchive, uploadFiles, type AccountProfile, type ProjectDetail, type PublicSlot } from "@/lib/api";
+import { createPrivatePreview, createPublicSlot, createUploadSession, getCachedProject, getCachedPublicSlots, getProject, listPublicSlots, switchPublicSlot, updateProject, uploadArchive, uploadFiles, type AccountProfile, type ProjectDetail, type PublicSlot } from "@/lib/api";
 import { prepareProjectDeployment, type PreparedUploadFile, type SelectedUploadFile } from "@/lib/archive";
 import { cn } from "@/lib/utils";
 import { ToastMessage, useToast } from "@/app/toast";
+import { STUDIO_PROJECTS_PATH } from "@/app/navigation";
 
-type Tab = "overview" | "update" | "publishing" | "settings" | "deployments";
+type Tab = "overview" | "versions" | "publishing" | "settings";
 type PreparedProjectDeployment = Awaited<ReturnType<typeof prepareProjectDeployment>>;
 
 export function ProjectDetailPage({ account, authReady, onNavigate, session, siteId }: {
@@ -22,15 +23,20 @@ export function ProjectDetailPage({ account, authReady, onNavigate, session, sit
   session: Session | null;
   siteId: string;
 }) {
-  const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
-  const [name, setName] = useState("");
+  const cachedProject = getCachedProject(siteId);
+  const [project, setProject] = useState<ProjectDetail | null>(cachedProject);
+  const [tab, setTab] = useState<Tab>(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested === "versions" || requested === "publishing" || requested === "settings" ? requested : "overview";
+  });
+  const [name, setName] = useState(cachedProject?.name ?? "");
   const [files, setFiles] = useState<SelectedUploadFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [prepared, setPrepared] = useState<PreparedProjectDeployment | null>(null);
-  const [slots, setSlots] = useState<PublicSlot[]>([]);
+  const [slots, setSlots] = useState<PublicSlot[]>(getCachedPublicSlots() ?? []);
+  const [showBindReminder, setShowBindReminder] = useState(false);
   const [subdomain, setSubdomain] = useState("");
   const [publishingBusy, setPublishingBusy] = useState(false);
   const { showToast } = useToast();
@@ -75,7 +81,7 @@ export function ProjectDetailPage({ account, authReady, onNavigate, session, sit
       } else {
         await uploadFiles({ uploadSessionId: uploadSession.uploadSessionId, deploymentId: uploadSession.deploymentId, files: prepared.files.map((file: PreparedUploadFile) => ({ file: file.file, path: file.path })) });
       }
-      await refresh(); setFiles([]); showToast("新版本已发布", "success"); setTab("deployments");
+      await refresh(); setFiles([]); showToast("新版本已生成", "success"); setShowBindReminder(!slots.some((slot) => slot.siteId === siteId)); selectTab("versions");
     } catch (cause) { showToast(cause instanceof Error ? cause.message : "发布失败", "error"); }
     finally { setBusy(false); }
   }
@@ -126,7 +132,15 @@ export function ProjectDetailPage({ account, authReady, onNavigate, session, sit
 
   if (!authReady || (session && !project && !error)) return <StudioLoading account={account} active="projects" label="正在读取项目" onNavigate={onNavigate} />;
 
-  const tabs: Array<[Tab, string]> = [["overview", "项目详情"], ["update", "更新项目"], ["publishing", "公开设置"], ["settings", "项目设置"], ["deployments", "部署记录"]];
+  function selectTab(nextTab: Tab) {
+    setTab(nextTab);
+    const url = new URL(window.location.href);
+    if (nextTab === "overview") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", nextTab);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
+  const tabs: Array<[Tab, string]> = [["overview", "概览"], ["versions", "版本"], ["publishing", "域名与公开"], ["settings", "设置"]];
   const currentSlot = slots.find((slot) => slot.siteId === siteId);
   const plan = getPlanConfig(account?.plan);
   const canPublish = Boolean(project?.deployments.some((deployment) => deployment.status === "active"));
@@ -136,24 +150,34 @@ export function ProjectDetailPage({ account, authReady, onNavigate, session, sit
         <div className={STUDIO_CONTENT_SHELL_CLASS}>
           <StudioSidebar account={account} active="projects" onNavigate={onNavigate} />
           <div className={STUDIO_MAIN_CLASS}>
+            <button className="mb-4 inline-flex cursor-pointer items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white" onClick={() => onNavigate(STUDIO_PROJECTS_PATH)} type="button"><ChevronLeft className="h-4 w-4" />返回我的项目</button>
             <div className={STUDIO_HEADER_CLASS}>
               <h1 className={STUDIO_TITLE_CLASS}>{project?.name ?? "项目"}</h1>
               {project?.publicUrl ? <a className="inline-flex h-10 items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white" href={project.publicUrl} rel="noreferrer" target="_blank">访问站点<ExternalLink className="h-4 w-4" /></a> : canPublish ? <button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50" disabled={publishingBusy} onClick={previewPrivateProject} type="button">{publishingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}私人预览</button> : <span className="inline-flex h-10 items-center gap-2 rounded-md border border-white/10 px-4 text-sm text-zinc-500"><Lock className="h-4 w-4" />仅自己可见</span>}
             </div>
             <div className="mt-5 flex gap-1 overflow-x-auto border-b border-white/10" role="tablist">
-              {tabs.map(([value, label]) => <button aria-selected={tab === value} className={cn("cursor-pointer whitespace-nowrap border-b-2 px-4 py-3 text-sm transition-colors", tab === value ? "border-white text-white" : "border-transparent text-zinc-500 hover:text-zinc-200")} key={value} onClick={() => { setTab(value); setError(null); }} role="tab" type="button">{label}</button>)}
+              {tabs.map(([value, label]) => <button aria-selected={tab === value} className={cn("cursor-pointer whitespace-nowrap border-b-2 px-4 py-3 text-sm transition-colors", tab === value ? "border-white text-white" : "border-transparent text-zinc-500 hover:text-zinc-200")} key={value} onClick={() => { selectTab(value); setError(null); }} role="tab" type="button">{label}</button>)}
             </div>
 
             <ToastMessage message={error} />
 
-            {project && tab === "overview" ? <div className={`${STUDIO_PANEL_CLASS} mt-5 grid gap-px overflow-hidden bg-white/10 sm:grid-cols-2`}>
-              {[["项目名称", project.name], ["可见范围", project.visibility === "public" ? "公开访问" : "仅自己可见"], ["公开地址", project.subdomain || "未绑定"], ["最近更新", new Date(project.updatedAt).toLocaleString("zh-CN")]].map(([label, value]) => <div className="bg-black p-5" key={label}><p className="text-xs text-zinc-500">{label}</p><p className="mt-2 break-all text-sm font-medium text-zinc-100">{value}</p></div>)}
+            {project && tab === "overview" ? <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className={`${STUDIO_PANEL_CLASS} overflow-hidden`}>
+                <div className="p-5 sm:p-6">
+                  <p className="text-xs font-medium text-zinc-500">当前状态</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-sm"><span className="rounded-md border border-white/15 px-2.5 py-1 text-zinc-200">{canPublish ? "版本已生成" : "尚无可用版本"}</span><ArrowRight className="h-4 w-4 text-zinc-700" /><span className={cn("rounded-md border px-2.5 py-1", currentSlot ? "border-white/30 text-white" : "border-white/10 text-zinc-500")}>{currentSlot ? "已公开" : "尚未公开"}</span></div>
+                  <p className="mt-4 text-sm leading-6 text-zinc-500">{currentSlot ? `访客可通过 ${currentSlot.hostname} 访问当前版本。` : canPublish ? "版本已准备好，绑定公开地址后访客即可访问。" : "请先上传项目资源并生成第一个私人版本。"}</p>
+                  <div className="mt-5 flex flex-wrap gap-3"><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black" onClick={() => selectTab("versions")} type="button"><UploadCloud className="h-4 w-4" />{canPublish ? "生成新版本" : "上传项目资源"}</button>{canPublish && !currentSlot ? <button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-200 hover:bg-white/5" onClick={() => selectTab("publishing")} type="button"><Globe2 className="h-4 w-4" />设置公开地址</button> : null}</div>
+                </div>
+                <div className="grid gap-px border-t border-white/10 bg-white/10 sm:grid-cols-3">{[["可见范围", currentSlot ? "公开访问" : "仅自己可见"], ["公开地址", currentSlot?.hostname || "未绑定"], ["最近更新", new Date(project.updatedAt).toLocaleString("zh-CN")]].map(([label, value]) => <div className="bg-black p-4" key={label}><p className="text-xs text-zinc-500">{label}</p><p className="mt-2 break-all text-sm font-medium text-zinc-100">{value}</p></div>)}</div>
+              </div>
+              <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}><div className="flex items-center justify-between gap-3"><h2 className="text-sm font-semibold text-white">最近版本</h2><button className="cursor-pointer text-xs text-zinc-500 hover:text-white" onClick={() => selectTab("versions")} type="button">查看全部</button></div>{project.deployments.length === 0 ? <p className="mt-4 text-sm text-zinc-500">暂无版本记录</p> : <div className="mt-3 grid gap-3">{project.deployments.slice(0, 3).map((deployment) => <div className="border-t border-white/10 pt-3 first:border-0 first:pt-0" key={deployment.id}><div className="flex items-center justify-between gap-3"><p className="text-sm font-medium text-zinc-200">版本 {deployment.version}</p><span className="text-xs text-zinc-500">{getStatusLabel(deployment.status)}</span></div><p className="mt-1 text-xs text-zinc-600">{new Date(deployment.createdAt).toLocaleString("zh-CN")}</p></div>)}</div>}</aside>
             </div> : null}
 
             {project && tab === "publishing" ? <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
               <div className={`${STUDIO_PANEL_CLASS} p-5 sm:p-6`}>
-                <div className="flex items-start gap-3"><Globe2 className="mt-0.5 h-5 w-5 text-zinc-400" /><div><h2 className="text-base font-semibold text-white">公开站点</h2><p className="mt-1 text-sm leading-6 text-zinc-500">公开地址属于你的账户，可以在已部署的项目之间切换。</p></div></div>
-                {!canPublish ? <p className="mt-5 rounded-md border border-white/10 px-4 py-3 text-sm text-zinc-400">当前项目还没有可公开的版本。请先在“更新项目”中发布一个版本。</p> : null}
+                <div className="flex items-start gap-3"><Globe2 className="mt-0.5 h-5 w-5 text-zinc-400" /><div><h2 className="text-base font-semibold text-white">公开站点</h2><p className="mt-1 text-sm leading-6 text-zinc-500">选择一个地址即可公开当前项目；也可以把已有地址从其他项目切换到这里。</p></div></div>
+                {!canPublish ? <p className="mt-5 rounded-md border border-white/10 px-4 py-3 text-sm text-zinc-400">当前项目还没有可公开的版本。请先在“版本”中生成一个私人版本。</p> : null}
                 <div className="mt-5 grid gap-3">
                   {slots.map((slot) => <div className="flex flex-col gap-3 rounded-md border border-white/10 p-4 sm:flex-row sm:items-center" key={slot.id}><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-100">{slot.hostname}</p><p className="mt-1 text-xs text-zinc-500">{slot.siteId === siteId ? "当前项目正在公开" : slot.siteId ? "正在展示其他项目" : "空闲公开地址"}</p></div>{slot.siteId === siteId ? <><a aria-label="访问公开站点" className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5" href={slot.publicUrl} rel="noreferrer" target="_blank">访问<ExternalLink className="h-4 w-4" /></a><button className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-white/15 px-3 text-sm text-zinc-400 hover:bg-white/5" disabled={publishingBusy} onClick={() => unbindSlot(slot)} type="button">解绑</button></> : <button className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black disabled:opacity-50" disabled={!canPublish || publishingBusy} onClick={() => bindSlot(slot)} type="button"><Link2 className="h-4 w-4" />绑定当前项目</button>}</div>)}
                 </div>
@@ -162,7 +186,9 @@ export function ProjectDetailPage({ account, authReady, onNavigate, session, sit
               <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}><p className="text-xs text-zinc-500">公开站点额度</p><p className="mt-2 text-2xl font-semibold text-white">{slots.length} / {plan.quotas.user.maxPublicSites}</p><p className="mt-4 text-sm leading-6 text-zinc-500">私人项目不占用公开额度。切换项目不会改变公开地址。</p>{currentSlot ? <p className="mt-4 border-t border-white/10 pt-4 text-xs text-zinc-400">当前：{currentSlot.hostname}</p> : null}</aside>
             </div> : null}
 
-            {project && tab === "update" ? <form className={`${STUDIO_PANEL_CLASS} mt-5 p-5 sm:p-6`} onSubmit={publish}>
+            {project && tab === "versions" ? <div className="mt-5 grid gap-5"><form className={`${STUDIO_PANEL_CLASS} p-5 sm:p-6`} onSubmit={publish}>
+              {showBindReminder ? <div className="mb-5 flex flex-col gap-3 rounded-md border border-white/20 bg-white/[0.04] p-4 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-white">新版本目前仅自己可见</p><p className="mt-1 text-sm text-zinc-400">绑定公开地址后，其他人就能访问这个项目。</p></div><button className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black" onClick={() => { setShowBindReminder(false); selectTab("publishing"); }} type="button">去绑定域名<ArrowRight className="h-4 w-4" /></button></div> : null}
+              <div className="mb-5"><h2 className="text-base font-semibold text-white">生成新版本</h2><p className="mt-1 text-sm text-zinc-500">上传并检查资源后生成私人版本；是否对外公开由域名设置决定。</p></div>
               <FileUpload allowDirectories disabled={busy} files={files.map((item) => item.file)} multiple onChange={(selected) => setFiles(selected.map((file) => ({ file, path: file.webkitRelativePath || file.name })))} />
               {files.length > 0 ? <div className="mt-5 rounded-md border border-white/10 bg-white/[0.025] p-4">
                 <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">{checking ? <Loader2 className="h-4 w-4 animate-spin" /> : prepared && !hasBlockingScanIssues(prepared.scan) ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}{checking ? "正在检查项目文件" : prepared && !hasBlockingScanIssues(prepared.scan) ? "项目文件检查完成" : "项目文件检查未通过"}</div>
@@ -180,17 +206,14 @@ export function ProjectDetailPage({ account, authReady, onNavigate, session, sit
                   {prepared.scan.issues.length > 0 ? <div className="mt-4 grid gap-2">{prepared.scan.issues.slice(0, 4).map((issue, index) => <p className="text-xs leading-5 text-zinc-400" key={`${issue.code}-${issue.path ?? index}`}>{issue.message}{issue.path ? ` · ${issue.path}` : ""}</p>)}</div> : null}
                 </> : null}
               </div> : null}
-              <button className="mt-5 inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || checking || !prepared || hasBlockingScanIssues(prepared.scan)} type="submit">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}{busy ? "正在发布" : checking ? "检查中" : "发布新版本"}</button>
-            </form> : null}
+              <button className="mt-5 inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || checking || !prepared || hasBlockingScanIssues(prepared.scan)} type="submit">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}{busy ? "正在生成" : checking ? "检查中" : "生成新版本"}</button>
+            </form><div className={`${STUDIO_PANEL_CLASS} overflow-hidden`}><div className="border-b border-white/10 p-5"><h2 className="text-base font-semibold text-white">历史版本</h2><p className="mt-1 text-sm text-zinc-500">保留生成记录；已清理的历史资源不会占用存储额度。</p></div>{project.deployments.length === 0 ? <p className="p-6 text-sm text-zinc-500">暂无版本记录</p> : project.deployments.map((deployment) => <div className="grid gap-3 border-b border-white/10 p-4 last:border-0 sm:grid-cols-[6rem_1fr_auto] sm:items-center" key={deployment.id}><p className="text-sm font-semibold text-white">版本 {deployment.version}</p><p className="text-sm text-zinc-500">{deployment.fileCount} 个文件 · {formatBytes(deployment.totalBytes)} · {new Date(deployment.createdAt).toLocaleString("zh-CN")}</p><span className="w-fit rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400">{getStatusLabel(deployment.status)}</span></div>)}</div></div> : null}
 
             {project && tab === "settings" ? <form className={`${STUDIO_PANEL_CLASS} mt-5 max-w-2xl p-5 sm:p-6`} onSubmit={saveName}>
               <label className="grid gap-2 text-sm text-zinc-300">项目名称<input className="h-11 rounded-md border border-white/20 bg-black px-3 text-white outline-none focus:border-white/50" maxLength={80} onChange={(event) => setName(event.target.value)} value={name} /></label>
               <button className="mt-5 inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black disabled:opacity-50" disabled={busy || !name.trim() || name.trim() === project.name} type="submit">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}保存</button>
             </form> : null}
 
-            {project && tab === "deployments" ? <div className={`${STUDIO_PANEL_CLASS} mt-5 overflow-hidden`}>
-              {project.deployments.length === 0 ? <p className="p-6 text-sm text-zinc-500">暂无部署记录</p> : project.deployments.map((deployment) => <div className="grid gap-3 border-b border-white/10 p-4 last:border-0 sm:grid-cols-[6rem_1fr_auto] sm:items-center" key={deployment.id}><p className="text-sm font-semibold text-white">版本 {deployment.version}</p><p className="text-sm text-zinc-500">{deployment.fileCount} 个文件 · {formatBytes(deployment.totalBytes)} · {new Date(deployment.createdAt).toLocaleString("zh-CN")}</p><span className="w-fit rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400">{getStatusLabel(deployment.status)}</span></div>)}
-            </div> : null}
           </div>
         </div>
       </section>

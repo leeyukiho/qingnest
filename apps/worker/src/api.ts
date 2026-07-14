@@ -295,7 +295,7 @@ export async function handleApi(request: Request, env: Env) {
         ? 403
         : message.includes("登录") || message.includes("过期")
           ? 401
-          : message.includes("套餐")
+          : message.includes("套餐") || message.includes("分钟后再试")
             ? 429
             : message.includes("不存在")
               ? 404

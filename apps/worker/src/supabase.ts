@@ -89,6 +89,7 @@ export type Database = {
           type: "platform_subdomain" | "custom_domain";
           status: "active" | "pending_review" | "blocked" | "deleted";
           created_at: string;
+          last_binding_change_at: string | null;
         };
         Insert: {
           id?: string;
@@ -98,10 +99,12 @@ export type Database = {
           type: "platform_subdomain" | "custom_domain";
           status?: "active" | "pending_review" | "blocked" | "deleted";
           created_at?: string;
+          last_binding_change_at?: string | null;
         };
         Update: {
           site_id?: string | null;
           status?: "active" | "pending_review" | "blocked" | "deleted";
+          last_binding_change_at?: string | null;
         };
         Relationships: EmptyRelationships;
       };

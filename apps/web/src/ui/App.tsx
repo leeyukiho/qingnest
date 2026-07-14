@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { getCurrentAccount, setAccessTokenProvider, type AccountProfile } from "@/lib/api";
+import { getCurrentAccount, setAccessTokenProvider, subscribeToAccountChanges, type AccountProfile } from "@/lib/api";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { SiteNavbar } from "@/app/SiteNavbar";
 import { LAST_HOME_PAGE_INDEX } from "@/app/ui";
@@ -15,6 +15,9 @@ import {
   isHomePathname,
   isStudioPathname,
   STUDIO_ADMIN_PATH,
+  STUDIO_BILLING_PATH,
+  STUDIO_DOMAIN_PURCHASE_PATH,
+  STUDIO_DOMAINS_PATH,
   STUDIO_PATH,
   STUDIO_PROJECTS_PATH,
   STUDIO_PROFILE_PATH
@@ -27,6 +30,9 @@ import { HomePage } from "@/pages/HomePage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
+import { DomainsPage } from "@/pages/DomainsPage";
+import { DomainPurchasePage } from "@/pages/DomainPurchasePage";
+import { BillingPage } from "@/pages/BillingPage";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { ToastProvider } from "@/app/toast";
@@ -40,6 +46,7 @@ export function App() {
   const [account, setAccount] = useState<AccountProfile | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const wheelLockRef = useRef(false);
+  const accountRefreshedAtRef = useRef(0);
   const shouldReduceMotion = useReducedMotion();
   const isMobileViewport = useMediaQuery("(max-width: 767px), (hover: none) and (pointer: coarse)");
 
@@ -49,7 +56,7 @@ export function App() {
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
-  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
+  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
 
   const navigate = useCallback((path: string, options: { replace?: boolean } = {}) => {
     if (typeof window === "undefined") return;
@@ -201,7 +208,10 @@ export function App() {
 
     getCurrentAccount()
       .then((profile) => {
-        if (active) setAccount(profile);
+        if (active) {
+          setAccount(profile);
+          accountRefreshedAtRef.current = Date.now();
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -218,6 +228,34 @@ export function App() {
 
     return () => {
       active = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    let active = true;
+    let refreshTimer: number | null = null;
+    const refreshAccount = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        getCurrentAccount().then((profile) => {
+          if (!active) return;
+          setAccount(profile);
+          accountRefreshedAtRef.current = Date.now();
+        }).catch(() => undefined);
+      }, 500);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && Date.now() - accountRefreshedAtRef.current > 5 * 60 * 1000) refreshAccount();
+    };
+    const unsubscribe = subscribeToAccountChanges(refreshAccount);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      active = false;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [session]);
 
@@ -262,6 +300,12 @@ export function App() {
     routeContent = <StudioLoading account={account} active={studioActive} label="正在跳转登录" onNavigate={navigate} />;
   } else if (pathname === STUDIO_PROJECTS_PATH) {
     routeContent = <ProjectsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
+  } else if (pathname === STUDIO_DOMAIN_PURCHASE_PATH) {
+    routeContent = <DomainPurchasePage account={account} onNavigate={navigate} />;
+  } else if (pathname === STUDIO_BILLING_PATH) {
+    routeContent = <BillingPage account={account} onNavigate={navigate} />;
+  } else if (pathname === STUDIO_DOMAINS_PATH) {
+    routeContent = <DomainsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else if (pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`)) {
     const siteId = decodeURIComponent(pathname.slice(STUDIO_PROJECTS_PATH.length + 1));
     routeContent = <ProjectDetailPage account={account} authReady={authReady} onNavigate={navigate} session={session} siteId={siteId} />;

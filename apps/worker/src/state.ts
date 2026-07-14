@@ -1099,7 +1099,8 @@ export async function createPublicSlot(env: Env, input: { siteId: string; subdom
     site_id: input.siteId,
     hostname: availability.hostname ?? getDistributionHostname(env, availability.normalized),
     type: "platform_subdomain",
-    status: availability.requiresReview ? "pending_review" : "active"
+    status: availability.requiresReview ? "pending_review" : "active",
+    last_binding_change_at: new Date().toISOString()
   }).select("id, site_id, hostname, type, status").single();
   if (error || !domain) throw new Error(error?.message ?? "公开地址创建失败");
   await cachePublicSlot(env, domain, input.siteId, deployment);
@@ -1108,15 +1109,22 @@ export async function createPublicSlot(env: Env, input: { siteId: string; subdom
 
 export async function switchPublicSlot(env: Env, input: { slotId: string; siteId: string | null; user: AuthenticatedUser }) {
   const supabase = createServiceSupabase(env);
-  const { data: domain, error: domainError } = await supabase.from("domains").select("id, hostname, status").eq("id", input.slotId).eq("user_id", input.user.id).neq("status", "deleted").single();
+  const { data: domain, error: domainError } = await supabase.from("domains").select("id, hostname, status, site_id, last_binding_change_at").eq("id", input.slotId).eq("user_id", input.user.id).neq("status", "deleted").single();
   if (domainError || !domain) throw new Error("公开地址不存在或无权操作");
+  if (domain.site_id === input.siteId) return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
+  const cooldownMs = 10 * 60 * 1000;
+  const lastChange = domain.last_binding_change_at ? Date.parse(domain.last_binding_change_at) : 0;
+  if (lastChange && Date.now() - lastChange < cooldownMs) {
+    const remainingMinutes = Math.max(1, Math.ceil((cooldownMs - (Date.now() - lastChange)) / 60_000));
+    throw new Error(`该平台地址刚刚发生过绑定变更，请 ${remainingMinutes} 分钟后再试`);
+  }
   if (!input.siteId) {
-    const { error } = await supabase.from("domains").update({ site_id: null }).eq("id", domain.id).eq("user_id", input.user.id);
+    const { error } = await supabase.from("domains").update({ site_id: null, last_binding_change_at: new Date().toISOString() }).eq("id", domain.id).eq("user_id", input.user.id);
     if (error) throw new Error(error.message);
     await deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname);
   } else {
     const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
-    const { error } = await supabase.from("domains").update({ site_id: input.siteId }).eq("id", domain.id).eq("user_id", input.user.id);
+    const { error } = await supabase.from("domains").update({ site_id: input.siteId, last_binding_change_at: new Date().toISOString() }).eq("id", domain.id).eq("user_id", input.user.id);
     if (error) throw new Error(error.message);
     await cachePublicSlot(env, domain, input.siteId, deployment);
   }

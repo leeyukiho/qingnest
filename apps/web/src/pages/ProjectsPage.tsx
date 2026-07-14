@@ -7,7 +7,7 @@ import { getStatusLabel } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
 import { STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
-import { listProjects, type AccountProfile, type ProjectSummary } from "@/lib/api";
+import { getCachedProjects, listProjects, type AccountProfile, type ProjectSummary } from "@/lib/api";
 
 export function ProjectsPage({ account, authReady, onNavigate, session }: {
   account: AccountProfile | null;
@@ -15,8 +15,9 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
   onNavigate: (path: string) => void;
   session: Session | null;
 }) {
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedProjects = getCachedProjects();
+  const [projects, setProjects] = useState<ProjectSummary[]>(cachedProjects ?? []);
+  const [loading, setLoading] = useState(!cachedProjects);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="truncate text-base font-semibold text-white">{project.name}</h2>
-                        <p className="mt-2 flex items-center gap-1.5 truncate text-sm text-zinc-500">{project.visibility === "public" ? <Globe2 className="h-3.5 w-3.5 shrink-0" /> : <Lock className="h-3.5 w-3.5 shrink-0" />}{project.visibility === "public" ? project.subdomain : "仅自己可见"}</p>
+                        <p className="mt-2 flex items-center gap-1.5 truncate text-sm text-zinc-500">{project.visibility === "public" ? <Globe2 className="h-3.5 w-3.5 shrink-0" /> : <Lock className="h-3.5 w-3.5 shrink-0" />}{project.visibility === "public" ? "已绑定公开域名" : "仅自己可见"}</p>
                       </div>
                       <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400">{project.visibility === "public" ? "已公开" : getStatusLabel(project.status)}</span>
                     </div>
@@ -62,7 +63,7 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
                       <button className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-md bg-white/10 px-3 text-sm font-medium text-zinc-100 transition-colors hover:bg-white/15" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}`)} type="button">
                         管理项目<ArrowRight className="h-4 w-4" />
                       </button>
-                      {project.publicUrl ? <a aria-label="访问站点" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-400 transition-colors hover:bg-white/5 hover:text-white" href={project.publicUrl} rel="noreferrer" target="_blank"><ExternalLink className="h-4 w-4" /></a> : null}
+                      {project.publicUrl ? <a className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white" href={project.publicUrl} rel="noreferrer" target="_blank">访问网站<ExternalLink className="h-4 w-4" /></a> : <button className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-500 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}?tab=publishing`)} type="button">绑定域名<Globe2 className="h-4 w-4" /></button>}
                     </div>
                   </article>
                 ))}

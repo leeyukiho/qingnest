@@ -19,7 +19,7 @@ type PreparedProject = Awaited<ReturnType<typeof prepareProjectDeployment>>;
 const steps = [
   { id: 1 as const, label: "创建项目", icon: Globe2 },
   { id: 2 as const, label: "上传资源", icon: UploadCloud },
-  { id: 3 as const, label: "部署", icon: Rocket }
+  { id: 3 as const, label: "生成版本", icon: Rocket }
 ];
 
 export function DashboardPage({ account, authReady, onNavigate, session }: {
@@ -110,12 +110,12 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
             deploymentId: uploadSession.deploymentId,
             files: prepared.files.map((file: PreparedUploadFile) => ({ file: file.file, path: file.path }))
           });
-      if (deployed.status === "blocked") throw new Error("部署被安全检查阻止，请根据诊断修正资源");
+      if (deployed.status === "blocked") throw new Error("版本生成被安全检查阻止，请根据诊断修正资源");
       setResult(deployed);
       setSite({ ...site, publicUrl: deployed.publicUrl, status: deployed.status });
       window.history.replaceState({}, "", "/studio");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "部署失败，请重试");
+      setError(cause instanceof Error ? cause.message : "版本生成失败，请重试");
     } finally {
       setDeploying(false);
     }
@@ -148,7 +148,7 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
 
             {step === 1 ? <form className={`${STUDIO_PANEL_CLASS} mt-5 max-w-3xl p-5 sm:p-6`} onSubmit={createProject}>
               <label className="grid max-w-xl gap-2 text-sm font-medium text-zinc-200">项目名称<input className="h-11 rounded-md border border-white/20 bg-black px-3 text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-white/50" disabled={creating} maxLength={80} onChange={(event) => setSiteName(event.target.value)} placeholder="例如：个人作品集" value={siteName} /></label>
-              <p className="mt-4 text-sm leading-6 text-zinc-500">项目创建后默认为仅自己可见。完成部署后，可以将公开地址切换到这个项目。</p>
+              <p className="mt-4 text-sm leading-6 text-zinc-500">项目创建后默认为仅自己可见。生成版本后，可以为它设置公开地址。</p>
               <button className="mt-6 inline-flex h-11 cursor-pointer items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={creating || !siteName.trim()} type="submit">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}{creating ? "正在创建" : "创建私人项目"}</button>
             </form> : null}
 
@@ -168,14 +168,14 @@ export function DashboardPage({ account, authReady, onNavigate, session }: {
                   <button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" disabled={!prepared || blocked || analyzing} onClick={() => setStep(3)} type="button">确认资源<ChevronRight className="h-4 w-4" /></button>
                 </div>
               </div>
-              <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}><p className="text-xs text-zinc-500">私人项目已创建</p><p className="mt-2 truncate text-sm font-semibold text-white">{site.name}</p><p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-400"><Globe2 className="h-4 w-4" />仅自己可见</p><p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-500">现在退出也不会丢失。部署完成后，可在项目详情中绑定或切换公开地址。</p></aside>
+              <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}><p className="text-xs text-zinc-500">私人项目已创建</p><p className="mt-2 truncate text-sm font-semibold text-white">{site.name}</p><p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-400"><Globe2 className="h-4 w-4" />仅自己可见</p><p className="mt-5 border-t border-white/10 pt-4 text-sm leading-6 text-zinc-500">现在退出也不会丢失。版本生成后，可在项目详情中绑定或切换公开地址。</p></aside>
             </div> : null}
 
             {step === 3 && site && prepared ? <div className={`${STUDIO_PANEL_CLASS} mt-5 max-w-4xl p-5 sm:p-6`}>
-              {result ? <div className="py-4 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-white/20"><Check className="h-5 w-5" /></span><h2 className="mt-4 text-xl font-semibold">私人版本已部署</h2><p className="mt-2 text-sm text-zinc-400">{result.fileCount} 个文件，{formatBytes(result.totalBytes)}</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button className="inline-flex h-10 cursor-pointer items-center rounded-md bg-white px-4 text-sm font-semibold text-black" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${site.id}`)} type="button">管理公开设置</button></div></div> : <>
-                <div className="flex items-start gap-3"><FileCheck2 className="mt-0.5 h-5 w-5 text-zinc-400" /><div><h2 className="text-base font-semibold">部署确认</h2><p className="mt-1 text-sm text-zinc-500">{site.name} · {prepared.scan.fileCount} 个文件 · {formatBytes(prepared.scan.totalBytes)} · {getRiskLabel(prepared.scan.riskLevel)}</p></div></div>
+              {result ? <div className="py-4 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-white/20"><Check className="h-5 w-5" /></span><h2 className="mt-4 text-xl font-semibold">私人版本已生成</h2><p className="mt-2 text-sm text-zinc-400">{result.fileCount} 个文件，{formatBytes(result.totalBytes)}。当前只有你可以访问。</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button className="inline-flex h-10 cursor-pointer items-center rounded-md bg-white px-4 text-sm font-semibold text-black" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${site.id}?tab=publishing`)} type="button">设置公开地址</button><button className="inline-flex h-10 cursor-pointer items-center rounded-md border border-white/15 px-4 text-sm text-zinc-300 hover:bg-white/5" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${site.id}`)} type="button">查看项目概览</button><button className="inline-flex h-10 cursor-pointer items-center rounded-md border border-transparent px-4 text-sm text-zinc-500 hover:text-white" onClick={() => onNavigate(STUDIO_PROJECTS_PATH)} type="button">返回项目列表</button></div></div> : <>
+                <div className="flex items-start gap-3"><FileCheck2 className="mt-0.5 h-5 w-5 text-zinc-400" /><div><h2 className="text-base font-semibold">生成版本确认</h2><p className="mt-1 text-sm text-zinc-500">{site.name} · {prepared.scan.fileCount} 个文件 · {formatBytes(prepared.scan.totalBytes)} · {getRiskLabel(prepared.scan.riskLevel)}</p></div></div>
                 <div className="mt-5 grid gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 sm:grid-cols-2"><div className="bg-black p-4"><p className="text-xs text-zinc-500">可见范围</p><p className="mt-2 text-sm text-white">仅自己可见</p></div><div className="bg-black p-4"><p className="text-xs text-zinc-500">入口文件</p><p className="mt-2 text-sm text-white">{prepared.scan.entrypoint}</p></div></div>
-                <div className="mt-6 flex flex-wrap gap-3"><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-300 hover:bg-white/5" disabled={deploying} onClick={() => setStep(2)} type="button"><ChevronLeft className="h-4 w-4" />返回修改</button><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" disabled={deploying} onClick={deploy} type="button">{deploying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}{deploying ? "正在部署" : "部署项目"}</button></div>
+                <div className="mt-6 flex flex-wrap gap-3"><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-300 hover:bg-white/5" disabled={deploying} onClick={() => setStep(2)} type="button"><ChevronLeft className="h-4 w-4" />返回修改</button><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50" disabled={deploying} onClick={deploy} type="button">{deploying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}{deploying ? "正在生成" : "生成私人版本"}</button></div>
               </>}
             </div> : null}
 
