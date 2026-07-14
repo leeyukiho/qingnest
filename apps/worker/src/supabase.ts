@@ -107,7 +107,7 @@ export type Database = {
           id: string;
           site_id: string;
           version: number;
-          status: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review";
+          status: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
           r2_prefix: string;
           file_count: number;
           total_bytes: number;
@@ -121,7 +121,7 @@ export type Database = {
           id?: string;
           site_id: string;
           version: number;
-          status?: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review";
+          status?: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
           r2_prefix: string;
           file_count?: number;
           total_bytes?: number;
@@ -132,7 +132,7 @@ export type Database = {
           activated_at?: string | null;
         };
         Update: {
-          status?: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review";
+          status?: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
           file_count?: number;
           total_bytes?: number;
           entrypoint?: string | null;

@@ -3,12 +3,22 @@ import type { Session } from "@supabase/supabase-js";
 import { BadgeCheck, Crown, LayoutDashboard, Loader2, Lock, LogOut, Plus, UserRound } from "lucide-react";
 import type { AccountProfile } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { AuroraHero } from "@/components/ui/hero-2";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { isSessionEmailConfirmed } from "@/app/auth";
 import { STUDIO_ADMIN_PATH, STUDIO_PATH } from "@/app/navigation";
-import { LoadingScreen } from "@/app/feedback";
-import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_SECTION_CLASS } from "@/app/ui";
+import { StudioLoading } from "@/app/feedback";
+import {
+  STUDIO_CONTENT_SHELL_CLASS,
+  STUDIO_DETAIL_CELL_CLASS,
+  STUDIO_DETAIL_GRID_CLASS,
+  STUDIO_EYEBROW_CLASS,
+  STUDIO_HEADER_CLASS,
+  STUDIO_MAIN_CLASS,
+  STUDIO_PANEL_CLASS,
+  STUDIO_SECONDARY_BUTTON_CLASS,
+  STUDIO_TITLE_CLASS,
+  STUDIO_SECTION_CLASS
+} from "@/app/ui";
 import { cn } from "@/lib/utils";
 
 export function ProfilePage({
@@ -26,11 +36,11 @@ export function ProfilePage({
   const [error, setError] = useState<string | null>(null);
 
   if (!authReady) {
-    return <LoadingScreen label="正在读取账号" />;
+    return <StudioLoading account={account} active="profile" label="正在读取账号" onNavigate={onNavigate} />;
   }
 
   if (!session) {
-    return <LoadingScreen label="正在跳转登录" />;
+    return <StudioLoading account={account} active="profile" label="正在跳转登录" onNavigate={onNavigate} />;
   }
 
   const emailConfirmed = account?.emailConfirmed ?? isSessionEmailConfirmed(session);
@@ -54,23 +64,23 @@ export function ProfilePage({
   }
 
   return (
-    <AuroraHero className="min-h-dvh">
+    <div className="min-h-dvh bg-black">
       <section className={STUDIO_SECTION_CLASS}>
         <div className={STUDIO_CONTENT_SHELL_CLASS}>
 
           <StudioSidebar account={account} active="profile" onNavigate={onNavigate} />
 
-          <div className="mx-auto w-full min-w-0 max-w-3xl">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className={STUDIO_MAIN_CLASS}>
+          <div className={STUDIO_HEADER_CLASS}>
             <div>
-              <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100">
+              <p className={STUDIO_EYEBROW_CLASS}>
                 <UserRound className="h-4 w-4" />
                 个人中心
               </p>
-              <h1 className="mt-4 text-3xl font-semibold tracking-normal text-white">账号信息</h1>
+              <h1 className={STUDIO_TITLE_CLASS}>账号信息</h1>
             </div>
             <button
-              className="inline-flex h-10 w-fit items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+              className={STUDIO_SECONDARY_BUTTON_CLASS}
               onClick={() => onNavigate(STUDIO_PATH)}
               type="button"
             >
@@ -79,9 +89,9 @@ export function ProfilePage({
             </button>
           </div>
 
-          <div className="glass-surface mt-6 rounded-lg p-5 sm:p-6">
+          <div className={cn(STUDIO_PANEL_CLASS, "mt-5 p-5 sm:p-6")}>
             <div className="flex items-start gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-white/20 bg-black text-white">
                 {account?.role === "admin" ? <Crown className="h-6 w-6" /> : <UserRound className="h-6 w-6" />}
               </span>
               <div className="min-w-0">
@@ -90,13 +100,13 @@ export function ProfilePage({
               </div>
             </div>
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className={cn(STUDIO_DETAIL_GRID_CLASS, "mt-6 sm:grid-cols-3")}>
               {[
                 ["邮箱状态", emailConfirmed ? "已验证" : "未验证"],
                 ["套餐", account?.plan ?? "free"],
                 ["注册时间", createdDate]
               ].map(([label, value]) => (
-                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3" key={label}>
+                <div className={STUDIO_DETAIL_CELL_CLASS} key={label}>
                   <p className="text-xs font-medium text-zinc-500">{label}</p>
                   <p className="mt-1 text-sm font-semibold text-zinc-100">{value}</p>
                 </div>
@@ -105,10 +115,8 @@ export function ProfilePage({
 
             <div
               className={cn(
-                "mt-5 flex items-start gap-3 rounded-lg border px-3 py-3 text-sm leading-6",
-                emailConfirmed
-                  ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
-                  : "border-amber-300/20 bg-amber-400/10 text-amber-100"
+                "mt-5 flex items-start gap-3 rounded-md border px-3 py-3 text-sm leading-6",
+                emailConfirmed ? "border-white/30 bg-black text-zinc-200" : "border-white/30 bg-black text-zinc-200"
               )}
             >
               {emailConfirmed ? <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" /> : <Lock className="mt-0.5 h-4 w-4 shrink-0" />}
@@ -116,7 +124,7 @@ export function ProfilePage({
             </div>
 
             {error ? (
-              <p className="mt-4 rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-3 text-sm leading-6 text-rose-100">
+              <p className="mt-4 rounded-md border border-white/30 bg-black px-3 py-3 text-sm leading-6 text-zinc-200">
                 {error}
               </p>
             ) : null}
@@ -124,7 +132,7 @@ export function ProfilePage({
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               {account?.role === "admin" ? (
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+                  className={STUDIO_SECONDARY_BUTTON_CLASS}
                   onClick={() => onNavigate(STUDIO_ADMIN_PATH)}
                   type="button"
                 >
@@ -133,7 +141,7 @@ export function ProfilePage({
                 </button>
               ) : null}
               <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                className={cn(STUDIO_SECONDARY_BUTTON_CLASS, "disabled:opacity-50")}
                   disabled={signingOut}
                   onClick={handleSignOut}
                   type="button"
@@ -147,6 +155,6 @@ export function ProfilePage({
 
         </div>
       </section>
-    </AuroraHero>
+    </div>
   );
 }

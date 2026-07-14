@@ -172,7 +172,7 @@ export function FileUpload({
   return (
     <div
       className={cn(
-        "group relative mx-auto flex min-h-64 w-full max-w-4xl flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed bg-black p-6 text-center transition-colors",
+        "group relative mx-auto flex min-h-64 w-full max-w-4xl flex-col items-center justify-center overflow-hidden rounded-md border border-dashed bg-black p-6 text-center transition-colors",
         dragging
           ? "border-white bg-white/[0.03]"
           : "border-white/15 hover:border-white/40 hover:bg-white/[0.02]",
@@ -218,7 +218,7 @@ export function FileUpload({
 
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
       <div className="relative z-10 flex flex-col items-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-black text-zinc-100 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+        <span className="flex h-14 w-14 items-center justify-center rounded-md border border-white/20 bg-black text-zinc-100">
           {selectedFile ? hasMultipleFiles ? <FolderUp className="h-6 w-6" /> : <FileArchive className="h-6 w-6" /> : <UploadCloud className="h-6 w-6" />}
         </span>
         <p className="mt-5 text-base font-semibold text-white">

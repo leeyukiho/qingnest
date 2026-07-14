@@ -219,7 +219,7 @@ function HeroScreen({
   }
 
   return (
-    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"} particles>
       <section
         className={cn(
           CONTENT_TRACK_CLASS,
@@ -306,7 +306,7 @@ function StepsScreen({ mobile = false }: { mobile?: boolean }) {
   });
 
   return (
-    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"} particles>
       <section
         className={cn(
           CONTENT_TRACK_CLASS,
@@ -398,7 +398,7 @@ function StepsScreen({ mobile = false }: { mobile?: boolean }) {
 
 function PricingScreen({ mobile = false, onStart }: { mobile?: boolean; onStart: () => void }) {
   return (
-    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"} particles>
       <section
         className={cn(
           CONTENT_TRACK_CLASS,

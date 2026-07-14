@@ -1,5 +1,5 @@
 import type { DeploymentScanIssue, DeploymentScanResult } from "@qingnest/shared/deployment/types";
-import type { SiteDraft, UploadArchiveResult } from "@/lib/api";
+import type { DeploymentSummary, SiteDraft, UploadArchiveResult } from "@/lib/api";
 
 export function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -13,17 +13,20 @@ export function getRiskLabel(level: DeploymentScanResult["riskLevel"]) {
   return "低风险";
 }
 
-export function getStatusLabel(status: UploadArchiveResult["status"] | SiteDraft["status"]) {
+export function getStatusLabel(status: UploadArchiveResult["status"] | SiteDraft["status"] | DeploymentSummary["status"]) {
   if (status === "active") return "已发布";
   if (status === "pending_review") return "待审核";
-  if (status === "blocked") return "已阻止";
+  if (status === "blocked") return "已阻止";
+  if (status === "uploading" || status === "scanning") return "处理中";
+  if (status === "failed") return "失败";
+  if (status === "superseded") return "历史版本";
   return "草稿";
 }
 
 export function getIssueClass(issue: DeploymentScanIssue) {
-  if (issue.severity === "error") return "border-rose-300/20 bg-rose-400/10 text-rose-100";
-  if (issue.severity === "warning") return "border-amber-300/20 bg-amber-400/10 text-amber-100";
-  return "border-cyan-300/20 bg-cyan-400/10 text-cyan-100";
+  if (issue.severity === "error") return "border-white/40 bg-black text-zinc-100";
+  if (issue.severity === "warning") return "border-white/30 bg-black text-zinc-200";
+  return "border-white/20 bg-black text-zinc-300";
 }
 
 export function hasBlockingScanIssues(scan: DeploymentScanResult | null) {

@@ -2,11 +2,20 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { Crown, LayoutDashboard, Loader2, Lock, LogIn } from "lucide-react";
 import { getAdminOverview, type AccountProfile, type AdminOverview } from "@/lib/api";
-import { AuroraHero } from "@/components/ui/hero-2";
 import { StudioSidebar } from "@/app/StudioSidebar";
-import { LoadingScreen, RouteMessage } from "@/app/feedback";
+import { RouteMessage, StudioLoading } from "@/app/feedback";
 import { STUDIO_PATH } from "@/app/navigation";
-import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_SECTION_CLASS } from "@/app/ui";
+import {
+  STUDIO_CONTENT_SHELL_CLASS,
+  STUDIO_EYEBROW_CLASS,
+  STUDIO_HEADER_CLASS,
+  STUDIO_MAIN_CLASS,
+  STUDIO_PANEL_CLASS,
+  STUDIO_SECONDARY_BUTTON_CLASS,
+  STUDIO_TITLE_CLASS,
+  STUDIO_SECTION_CLASS
+} from "@/app/ui";
+import { cn } from "@/lib/utils";
 
 export function AdminPage({
   account,
@@ -48,7 +57,7 @@ export function AdminPage({
   }, [account?.role, session]);
 
   if (!authReady) {
-    return <LoadingScreen label="正在读取账号" />;
+    return <StudioLoading account={account} active="admin" label="正在读取账号" onNavigate={onNavigate} />;
   }
 
   if (!session) {
@@ -65,13 +74,13 @@ export function AdminPage({
 
   if (account && account.role !== "admin") {
     return (
-      <AuroraHero className="min-h-dvh">
+      <div className="min-h-dvh bg-black">
         <section className={STUDIO_SECTION_CLASS}>
           <div className={STUDIO_CONTENT_SHELL_CLASS}>
             <StudioSidebar account={account} active="admin" onNavigate={onNavigate} />
             <div className="mx-auto flex min-h-[calc(100dvh-6rem)] w-full min-w-0 max-w-5xl items-center justify-center">
               <div className="max-w-xl">
-                <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/10 text-white">
+                <span className="flex h-12 w-12 items-center justify-center rounded-md border border-white/20 bg-black text-white">
                   <Lock className="h-5 w-5" />
                 </span>
                 <h1 className="mt-5 text-4xl font-bold tracking-normal text-white">需要管理员权限</h1>
@@ -79,7 +88,7 @@ export function AdminPage({
                   当前账号是用户权限。管理员角色需要在 Supabase profiles.role 中由服务端或 SQL 设置。
                 </p>
                 <button
-                  className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+                  className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-md border border-white/20 bg-black px-5 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white hover:text-black"
                   onClick={() => onNavigate(STUDIO_PATH)}
                   type="button"
                 >
@@ -90,7 +99,7 @@ export function AdminPage({
             </div>
           </div>
         </section>
-      </AuroraHero>
+      </div>
     );
   }
 
@@ -105,24 +114,24 @@ export function AdminPage({
     : [];
 
   return (
-    <AuroraHero className="min-h-dvh">
+    <div className="min-h-dvh bg-black">
       <section className={STUDIO_SECTION_CLASS}>
         <div className={STUDIO_CONTENT_SHELL_CLASS}>
 
           <StudioSidebar account={account} active="admin" onNavigate={onNavigate} />
 
-          <div className="mx-auto w-full min-w-0 max-w-5xl">
+          <div className={STUDIO_MAIN_CLASS}>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className={STUDIO_HEADER_CLASS}>
           <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-4 py-2 text-sm font-medium text-amber-100">
+            <p className={STUDIO_EYEBROW_CLASS}>
               <Crown className="h-4 w-4" />
               管理员
             </p>
-            <h1 className="mt-4 text-3xl font-semibold tracking-normal text-white">平台概览</h1>
+            <h1 className={STUDIO_TITLE_CLASS}>平台概览</h1>
           </div>
           <button
-            className="inline-flex h-10 w-fit items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+            className={STUDIO_SECONDARY_BUTTON_CLASS}
             onClick={() => onNavigate(STUDIO_PATH)}
             type="button"
           >
@@ -132,22 +141,22 @@ export function AdminPage({
         </div>
 
         {loading ? (
-          <div className="mt-8 flex items-center gap-3 text-sm text-zinc-300">
+          <div className="mt-5 flex items-center gap-3 text-sm text-zinc-300">
             <Loader2 className="h-4 w-4 animate-spin" />
             正在读取数据
           </div>
         ) : null}
 
         {error ? (
-          <p className="mt-8 rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-3 text-sm leading-6 text-rose-100">
+          <p className="mt-5 rounded-md border border-white/30 bg-black px-3 py-3 text-sm leading-6 text-zinc-200">
             {error}
           </p>
         ) : null}
 
         {overview ? (
-          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className={cn(STUDIO_PANEL_CLASS, "mt-5 grid overflow-hidden sm:grid-cols-2 lg:grid-cols-5")}>
             {stats.map(([label, value]) => (
-              <div className="glass-surface rounded-lg p-4" key={label}>
+              <div className="border-b border-white/20 p-4 last:border-b-0 sm:[&:nth-child(odd)]:border-r sm:[&:nth-child(odd)]:border-white/20 lg:border-b-0 lg:border-r lg:last:border-r-0" key={label}>
                 <p className="text-sm font-medium text-zinc-500">{label}</p>
                 <p className="mt-3 text-3xl font-semibold tracking-normal text-white">{value}</p>
               </div>
@@ -159,6 +168,6 @@ export function AdminPage({
         </div>
 
       </section>
-    </AuroraHero>
+    </div>
   );
 }

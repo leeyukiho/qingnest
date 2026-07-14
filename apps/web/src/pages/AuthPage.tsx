@@ -4,9 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, Eye, EyeOff, Loader2, Lock, LogIn } from "lucide-react";
 import { signUpWithEmailPassword, type SignUpConfirmationResult } from "@/lib/api";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { AuroraHero } from "@/components/ui/hero-2";
 import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
-import { TextHoverEffect } from "@/components/ui/text-hover-effect";
 import {
   AUTH_TOGGLE_ACTIVE_CLASS,
   AUTH_TOGGLE_BUTTON_CLASS,
@@ -166,17 +164,17 @@ export function AuthPage({
   const statusTone = error ? "error" : notice ? "success" : null;
 
   return (
-    <AuroraHero className="min-h-dvh">
+    <div className="min-h-dvh bg-black">
       <section className={cn(CONTENT_TRACK_CLASS, "grid min-h-dvh items-center gap-6 pb-10 pt-24 lg:grid-cols-[1fr_28rem]")}>
         <motion.div
           animate={{ opacity: 1, y: 0 }}
           className="max-w-3xl"
-          initial={{ opacity: 0, y: 20 }}
-          transition={{ duration: 0.46, ease: "easeOut" }}
+          initial={{ opacity: 0, y: 6 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
         >
-          <h1 className="sr-only">QingNest</h1>
-          <div className="aspect-[4/1] w-full max-w-[40rem] overflow-visible">
-            <TextHoverEffect revealRadius={540} text="QingNest" />
+          <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-5xl">QingNest</h1>
+          <div aria-hidden="true" className="hidden">
+            <span className="block text-2xl font-semibold text-white">QingNest</span>
           </div>
           <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300 sm:text-lg">
             一键发布静态站点，自动检查文件风险，注册即赠永久域名，让 AI 页面和个人作品更快上线分享。
@@ -185,12 +183,12 @@ export function AuthPage({
 
         <motion.form
           animate={{ opacity: 1, y: 0 }}
-          className="glass-surface rounded-lg p-5 sm:p-6"
-          initial={{ opacity: 0, y: 24 }}
+          className="rounded-md border border-white/20 bg-black p-5 sm:p-6"
+          initial={{ opacity: 0, y: 6 }}
           onSubmit={handleSubmit}
-          transition={{ delay: 0.08, duration: 0.48, ease: "easeOut" }}
+          transition={{ delay: 0.04, duration: 0.2, ease: "easeOut" }}
         >
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
+          <div className="grid grid-cols-2 gap-2 rounded-md border border-white/20 bg-black p-1">
             {(["sign_in", "sign_up"] as const).map((item) => (
               <button
                 className={cn(
@@ -216,7 +214,7 @@ export function AuthPage({
           </label>
           <input
             autoComplete="email"
-            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
+            className="mt-2 h-11 w-full rounded-md border border-white/20 bg-black px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-white"
             id="auth-email"
             onChange={(event) => {
               setEmail(event.target.value);
@@ -234,7 +232,7 @@ export function AuthPage({
           <div className="relative mt-2">
             <input
               autoComplete={mode === "sign_in" ? "current-password" : "new-password"}
-              className="h-11 w-full rounded-lg border border-white/10 bg-black/40 py-0 pl-3 pr-11 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
+              className="h-11 w-full rounded-md border border-white/20 bg-black py-0 pl-3 pr-11 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-white"
               id="auth-password"
               onChange={(event) => {
                 setPassword(event.target.value);
@@ -247,7 +245,7 @@ export function AuthPage({
             />
             <button
               aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
-              className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+              className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
               onClick={() => setPasswordVisible((visible) => !visible)}
               type="button"
             >
@@ -267,7 +265,7 @@ export function AuthPage({
               <div className="relative mt-2">
                 <input
                   autoComplete="new-password"
-                  className="h-11 w-full rounded-lg border border-white/10 bg-black/40 py-0 pl-3 pr-11 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300"
+                  className="h-11 w-full rounded-md border border-white/20 bg-black py-0 pl-3 pr-11 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-white"
                   id="auth-password-confirmation"
                   onChange={(event) => {
                     setPasswordConfirmation(event.target.value);
@@ -280,7 +278,7 @@ export function AuthPage({
                 />
                 <button
                   aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
-                  className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                  className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
                   onClick={() => setPasswordVisible((visible) => !visible)}
                   type="button"
                 >
@@ -301,9 +299,7 @@ export function AuthPage({
                   animate={{ opacity: 1, y: 0 }}
                   className={cn(
                     "flex h-full items-center gap-1.5 overflow-hidden rounded-lg border px-2.5 text-[11px] leading-none",
-                    statusTone === "error"
-                      ? "border-rose-300/20 bg-rose-400/10 text-rose-100"
-                      : "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+                    "border-white/30 bg-black text-zinc-200"
                   )}
                   exit={{ opacity: 0, y: -6 }}
                   initial={{ opacity: 0, y: 6 }}
@@ -336,6 +332,6 @@ export function AuthPage({
           </HoverBorderGradient>
         </motion.form>
       </section>
-    </AuroraHero>
+    </div>
   );
 }

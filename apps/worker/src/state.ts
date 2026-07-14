@@ -15,8 +15,25 @@ type DraftSite = {
   name: string;
   subdomain: string;
   publicUrl: string;
-  status: "draft" | "pending_review" | "active";
+  status: "draft" | "pending_review" | "active" | "blocked";
 };
+
+export type ProjectSummary = DraftSite & {
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DeploymentSummary = {
+  id: string;
+  version: number;
+  status: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
+  fileCount: number;
+  totalBytes: number;
+  createdAt: string;
+  activatedAt: string | null;
+};
+
+export type ProjectDetail = ProjectSummary & { deployments: DeploymentSummary[] };
 
 type MemoryUploadSession = {
   siteId: string;
@@ -184,6 +201,39 @@ async function putDeploymentFiles(env: Env, r2Prefix: string, files: DeployableA
       }
     });
   }
+}
+
+async function deleteDeploymentPrefix(env: Env, r2Prefix: string) {
+  const siteAssets = getSiteAssets(env);
+  let cursor: string | undefined;
+
+  do {
+    const result = await siteAssets.list({ prefix: `${r2Prefix}/`, cursor });
+    const keys = result.objects.map((object) => object.key);
+    if (keys.length > 0) await siteAssets.delete(keys);
+    cursor = result.truncated ? result.cursor : undefined;
+  } while (cursor);
+}
+
+function createWelcomeFile(env: Env, siteId: string) {
+  const platform = getWorkerPlatformConfig(env);
+  const studioUrl = `${platform.domains.publicProtocol}://${platform.domains.appHost}/studio/projects/${siteId}`;
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>项目创建成功</title><style>html{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#fafafa;font:16px/1.6 system-ui,sans-serif;padding:24px}main{width:min(560px,100%);border:1px solid #27272a;border-radius:8px;padding:32px}h1{margin:0;font-size:28px}p{color:#a1a1aa;margin:12px 0 24px}a{display:inline-flex;padding:10px 16px;border-radius:6px;background:#fff;color:#000;text-decoration:none;font-weight:600}</style></head><body><main><h1>项目创建成功</h1><p>这个地址已经可以访问。返回轻巢上传你的项目资源并完成部署。</p><a href="${studioUrl}">返回轻巢</a></main></body></html>`;
+  return new File([html], "index.html", { type: "text/html;charset=utf-8" });
+}
+
+async function publishWelcomePage(env: Env, siteId: string, user?: AuthenticatedUser) {
+  const file = createWelcomeFile(env, siteId);
+  const prepared = await readDeployableFiles([{ file, path: "index.html" }]);
+  const session = await createUploadSession(env, { siteId, scan: prepared.scan, user });
+
+  if (session.status === "blocked") throw new Error("默认页面未通过发布检查");
+  return completeFilesUpload(env, {
+    uploadSessionId: session.uploadSessionId,
+    deploymentId: session.deploymentId,
+    files: [{ file, path: "index.html" }],
+    user
+  });
 }
 
 function hasBlockingIssues(issues: DeploymentScanIssue[]) {
@@ -751,26 +801,130 @@ async function listUserSiteIds(env: Env, user: AuthenticatedUser) {
   return (data ?? []).map((site) => site.id);
 }
 
-async function assertStorageQuota(env: Env, user: AuthenticatedUser, nextDeploymentBytes: number) {
+async function assertStorageQuota(env: Env, user: AuthenticatedUser, siteId: string, nextDeploymentBytes: number) {
   const supabase = createServiceSupabase(env);
   const plan = getPlanConfig(await getUserPlan(env, user));
   const siteIds = await listUserSiteIds(env, user);
-  const { data, error } = await supabase
-    .from("deployments")
-    .select("total_bytes")
-    .in("site_id", siteIds.length > 0 ? siteIds : ["00000000-0000-0000-0000-000000000000"])
-    .neq("status", "blocked")
-    .neq("status", "failed");
+  const [{ data, error }, { data: replacingSite, error: siteError }] = await Promise.all([
+    supabase
+      .from("deployments")
+      .select("id, total_bytes")
+      .in("site_id", siteIds.length > 0 ? siteIds : ["00000000-0000-0000-0000-000000000000"])
+      .neq("status", "blocked")
+      .neq("status", "failed")
+      .neq("status", "superseded"),
+    supabase.from("sites").select("active_deployment_id").eq("id", siteId).eq("user_id", user.id).neq("status", "deleted").maybeSingle()
+  ]);
 
   if (error) {
     throw new Error(error.message);
   }
+  if (siteError || !replacingSite) throw new Error(siteError?.message ?? "项目不存在或无权访问");
 
-  const usedBytes = (data ?? []).reduce((total, deployment) => total + Number(deployment.total_bytes ?? 0), 0);
+  const usedBytes = (data ?? []).reduce(
+    (total, deployment) => deployment.id === replacingSite.active_deployment_id ? total : total + Number(deployment.total_bytes ?? 0),
+    0
+  );
 
   if (usedBytes + nextDeploymentBytes > plan.quotas.user.maxStorageBytes) {
     throw new Error(`免费套餐总存储最多 ${Math.round(plan.quotas.user.maxStorageBytes / 1024 / 1024)} MB`);
   }
+}
+
+function projectStatus(status: string): DraftSite["status"] {
+  if (status === "active" || status === "pending_review" || status === "blocked") return status;
+  return "draft";
+}
+
+export async function listProjects(env: Env, user?: AuthenticatedUser): Promise<ProjectSummary[]> {
+  if (!hasServiceSupabase(env)) {
+    return Array.from(draftSites.values()).map((site) => ({
+      ...site,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    }));
+  }
+
+  if (!user) throw new Error("请先登录后再查看项目");
+  const supabase = createServiceSupabase(env);
+  const { data: sites, error } = await supabase
+    .from("sites")
+    .select("id, name, status, created_at, updated_at")
+    .eq("user_id", user.id)
+    .neq("status", "deleted")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  const siteIds = (sites ?? []).map((site) => site.id);
+  const { data: domains, error: domainError } = siteIds.length
+    ? await supabase.from("domains").select("site_id, hostname").in("site_id", siteIds).eq("type", "platform_subdomain").neq("status", "deleted")
+    : { data: [], error: null };
+  if (domainError) throw new Error(domainError.message);
+  const hostnames = new Map((domains ?? []).map((domain) => [domain.site_id, domain.hostname]));
+
+  return (sites ?? []).map((site) => {
+    const hostname = hostnames.get(site.id) ?? "";
+    return {
+      id: site.id,
+      name: site.name,
+      status: projectStatus(site.status),
+      subdomain: hostname.split(".")[0] ?? hostname,
+      publicUrl: hostname ? getPublicUrlFromHostname(env, hostname) : "",
+      createdAt: site.created_at,
+      updatedAt: site.updated_at
+    };
+  });
+}
+
+export async function getProject(env: Env, siteId: string, user?: AuthenticatedUser): Promise<ProjectDetail> {
+  const project = (await listProjects(env, user)).find((site) => site.id === siteId);
+  if (!project) throw new Error("项目不存在或无权访问");
+  if (!hasServiceSupabase(env)) return { ...project, deployments: [] };
+
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await supabase
+    .from("deployments")
+    .select("id, version, status, file_count, total_bytes, created_at, activated_at")
+    .eq("site_id", siteId)
+    .order("version", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  return {
+    ...project,
+    deployments: (data ?? []).map((deployment) => ({
+      id: deployment.id,
+      version: deployment.version,
+      status: deployment.status,
+      fileCount: deployment.file_count,
+      totalBytes: deployment.total_bytes,
+      createdAt: deployment.created_at,
+      activatedAt: deployment.activated_at
+    }))
+  };
+}
+
+export async function updateProjectName(env: Env, siteId: string, name: string, user?: AuthenticatedUser) {
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new Error("项目名称不能为空");
+  if (normalizedName.length > 80) throw new Error("项目名称不能超过 80 个字符");
+
+  if (!hasServiceSupabase(env)) {
+    const site = draftSites.get(siteId);
+    if (!site) throw new Error("项目不存在或无权访问");
+    draftSites.set(siteId, { ...site, name: normalizedName });
+    return getProject(env, siteId, user);
+  }
+
+  if (!user) throw new Error("请先登录后再编辑项目");
+  const supabase = createServiceSupabase(env);
+  const { error } = await supabase
+    .from("sites")
+    .update({ name: normalizedName, updated_at: new Date().toISOString() })
+    .eq("id", siteId)
+    .eq("user_id", user.id)
+    .neq("status", "deleted");
+  if (error) throw new Error(error.message);
+  return getProject(env, siteId, user);
 }
 
 export async function createDraftSite(
@@ -816,6 +970,7 @@ export async function createDraftSite(
     });
 
     if (domainError) {
+      await supabase.from("sites").update({ status: "deleted" }).eq("id", site.id).eq("user_id", input.user.id);
       throw new Error(domainError.message);
     }
 
@@ -827,8 +982,18 @@ export async function createDraftSite(
       status: site.status === "active" ? "active" : site.status === "pending_review" ? "pending_review" : "draft"
     };
 
-    claimedSubdomains.add(createdSite.subdomain);
-    return createdSite;
+    try {
+      const welcome = await publishWelcomePage(env, createdSite.id, input.user);
+      createdSite.status = welcome.status === "active" ? "active" : "pending_review";
+      claimedSubdomains.add(createdSite.subdomain);
+      return createdSite;
+    } catch (error) {
+      await Promise.all([
+        supabase.from("domains").update({ status: "deleted" }).eq("site_id", site.id),
+        supabase.from("sites").update({ status: "deleted" }).eq("id", site.id).eq("user_id", input.user.id)
+      ]);
+      throw error;
+    }
   }
 
   const site: DraftSite = {
@@ -840,8 +1005,15 @@ export async function createDraftSite(
   };
 
   draftSites.set(site.id, site);
-  claimedSubdomains.add(site.subdomain);
-  return site;
+  try {
+    const welcome = await publishWelcomePage(env, site.id, input.user);
+    site.status = welcome.status === "active" ? "active" : "pending_review";
+    claimedSubdomains.add(site.subdomain);
+    return site;
+  } catch (error) {
+    draftSites.delete(site.id);
+    throw error;
+  }
 }
 
 export async function createUploadSession(
@@ -856,7 +1028,7 @@ export async function createUploadSession(
     assertEmailConfirmed(input.user);
     await ensureProfile(env, input.user);
     await assertUploadSessionQuota(env, input.user);
-    await assertStorageQuota(env, input.user, input.scan.totalBytes);
+    await assertStorageQuota(env, input.user, input.siteId, input.scan.totalBytes);
 
     return createPersistentUploadSession(env, {
       siteId: input.siteId,
@@ -1147,6 +1319,13 @@ async function completePersistentDeploymentUpload(
   const target = await getPersistentUploadTarget(env, input);
   const prepared = input.prepared;
   const supabase = createServiceSupabase(env);
+  const { data: previousDeployments, error: previousDeploymentsError } = await supabase
+    .from("deployments")
+    .select("r2_prefix")
+    .eq("site_id", target.siteId)
+    .neq("id", target.deploymentId);
+
+  if (previousDeploymentsError) throw new Error(previousDeploymentsError.message);
 
   if (hasBlockingIssues(prepared.scan.issues)) {
     await supabase.from("deployments").update({ status: "blocked" }).eq("id", target.deploymentId);
@@ -1220,6 +1399,14 @@ async function completePersistentDeploymentUpload(
   };
 
   await writeDomainCache(env, target.subdomain, mapping);
+  if (finalStatus === "active") {
+    const previous = previousDeployments ?? [];
+    const cleanupResults = await Promise.allSettled(previous.map((deployment) => deleteDeploymentPrefix(env, deployment.r2_prefix)));
+    const cleanedPrefixes = previous.filter((_, index) => cleanupResults[index]?.status === "fulfilled").map((deployment) => deployment.r2_prefix);
+    if (cleanedPrefixes.length > 0) {
+      await supabase.from("deployments").update({ status: "superseded" }).eq("site_id", target.siteId).neq("id", target.deploymentId).in("r2_prefix", cleanedPrefixes);
+    }
+  }
   return resultFromScan(target, prepared.scan, finalStatus);
 }
 
@@ -1331,6 +1518,98 @@ export async function completeFilesUpload(
   });
 }
 
+async function provisionLegacyWelcomeDeployment(
+  env: Env,
+  domain: { hostname: string; site_id: string; status: string },
+  site: { active_deployment_id: string | null; status: string; user_id: string }
+) {
+  if (site.active_deployment_id || domain.status !== "active" || site.status === "blocked") {
+    return null;
+  }
+
+  const supabase = createServiceSupabase(env);
+  const file = createWelcomeFile(env, domain.site_id);
+  const content = new Uint8Array(await file.arrayBuffer());
+  const deploymentId = crypto.randomUUID();
+  const r2Prefix = `sites/${domain.site_id}/deployments/${deploymentId}`;
+  const { data: versions, error: versionError } = await supabase
+    .from("deployments")
+    .select("version")
+    .eq("site_id", domain.site_id)
+    .order("version", { ascending: false })
+    .limit(1);
+
+  if (versionError) return null;
+
+  const activatedAt = new Date().toISOString();
+  const { error: deploymentError } = await supabase.from("deployments").insert({
+    id: deploymentId,
+    site_id: domain.site_id,
+    version: (versions?.[0]?.version ?? 0) + 1,
+    status: "active",
+    r2_prefix: r2Prefix,
+    file_count: 1,
+    total_bytes: content.byteLength,
+    entrypoint: "index.html",
+    spa_fallback_enabled: true,
+    risk_score: 0,
+    activated_at: activatedAt
+  });
+
+  if (deploymentError) {
+    return null;
+  }
+
+  try {
+    await getSiteAssets(env).put(`${r2Prefix}/index.html`, content, {
+      httpMetadata: { contentType: "text/html;charset=utf-8" }
+    });
+
+    const { error: fileError } = await supabase.from("deployment_files").insert({
+      deployment_id: deploymentId,
+      path: "index.html",
+      size: content.byteLength,
+      content_type: "text/html;charset=utf-8"
+    });
+    if (fileError) throw new Error(fileError.message);
+
+    const { data: activatedSite, error: siteError } = await supabase
+      .from("sites")
+      .update({ status: "active", active_deployment_id: deploymentId })
+      .eq("id", domain.site_id)
+      .is("active_deployment_id", null)
+      .select("id")
+      .maybeSingle();
+    if (siteError || !activatedSite) throw new Error(siteError?.message ?? "Site was activated concurrently");
+
+    await supabase.from("audit_events").insert({
+      user_id: site.user_id,
+      site_id: domain.site_id,
+      deployment_id: deploymentId,
+      event_type: "deployment.legacy_welcome_page_created",
+      risk_score: 0,
+      message: "Created the default welcome page for a legacy site without an active deployment"
+    });
+
+    const mapping: DomainMapping = {
+      hostname: domain.hostname,
+      siteId: domain.site_id,
+      deploymentId,
+      r2Prefix,
+      spaFallbackEnabled: true,
+      status: "active"
+    };
+    await writeDomainCache(env, domain.hostname.split(".")[0] ?? "", mapping);
+    return mapping;
+  } catch {
+    await Promise.allSettled([
+      deleteDeploymentPrefix(env, r2Prefix),
+      supabase.from("deployments").delete().eq("id", deploymentId)
+    ]);
+    return null;
+  }
+}
+
 export async function getDomainMapping(env: Env, hostname: string) {
   const subdomain = hostname.split(".")[0] ?? "";
   const value = await readDomainCache(env, subdomain);
@@ -1357,13 +1636,17 @@ export async function getDomainMapping(env: Env, hostname: string) {
 
   const { data: site, error: siteError } = await supabase
     .from("sites")
-    .select("active_deployment_id")
+    .select("active_deployment_id, status, user_id")
     .eq("id", domain.site_id)
     .neq("status", "deleted")
     .maybeSingle();
 
-  if (siteError || !site?.active_deployment_id) {
+  if (siteError || !site) {
     return null;
+  }
+
+  if (!site.active_deployment_id) {
+    return provisionLegacyWelcomeDeployment(env, domain, site);
   }
 
   const { data: deployment, error: deploymentError } = await supabase

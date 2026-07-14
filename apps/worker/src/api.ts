@@ -12,6 +12,9 @@ import {
   getAccountProfile,
   getAdminOverview,
   getAuthenticatedUser,
+  getProject,
+  listProjects,
+  updateProjectName,
   signUpWithEmailPassword
 } from "./state";
 import { hasServiceSupabase } from "./supabase";
@@ -21,6 +24,8 @@ type SiteCreateInput = {
   name?: string;
   subdomain?: string;
 };
+
+type SiteUpdateInput = { name?: string };
 
 type UploadSessionInput = {
   siteId?: string;
@@ -144,6 +149,23 @@ export async function handleApi(request: Request, env: Env) {
       return json(site, { status: 201 });
     }
 
+    if (request.method === "GET" && url.pathname === "/api/sites") {
+      const user = await maybeGetUser(request, env);
+      return json(await listProjects(env, user));
+    }
+
+    const siteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)$/);
+    if (request.method === "GET" && siteMatch) {
+      const user = await maybeGetUser(request, env);
+      return json(await getProject(env, decodeURIComponent(siteMatch[1] ?? ""), user));
+    }
+
+    if (request.method === "PATCH" && siteMatch) {
+      const input = await readJson<SiteUpdateInput>(request);
+      const user = await maybeGetUser(request, env);
+      return json(await updateProjectName(env, decodeURIComponent(siteMatch[1] ?? ""), input.name ?? "", user));
+    }
+
     if (request.method === "POST" && url.pathname === "/api/upload-sessions") {
       const input = await readJson<UploadSessionInput>(request);
 
@@ -245,7 +267,13 @@ export async function handleApi(request: Request, env: Env) {
           ? 401
           : message.includes("套餐")
             ? 429
-            : 500;
+            : message.includes("不存在")
+              ? 404
+              : message.includes("不可用") || message.includes("已被")
+                ? 409
+                : message.includes("缺少") || message.includes("不能") || message.includes("无效") || message.includes("必须")
+                  ? 400
+                  : 500;
     return problem(message, status);
   }
 }

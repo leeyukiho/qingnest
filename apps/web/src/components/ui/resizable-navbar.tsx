@@ -59,12 +59,12 @@ export function Navbar({
       <motion.header
         animate={{ opacity: 1, y: 0 }}
         className={cn(
-          "fixed inset-x-0 top-0 z-50 w-screen bg-black/20 backdrop-blur-xl",
+        "fixed inset-x-0 top-0 z-50 w-screen bg-black/90",
           showDivider ? "border-b border-white/15" : "border-b border-transparent",
           className
         )}
-        initial={{ opacity: 0, y: -16 }}
-        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+        initial={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       >
         {children}
       </motion.header>
@@ -84,7 +84,7 @@ export function NavBody({ children, className }: { children: ReactNode; classNam
         "flex h-14 w-full items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-8",
         className
       )}
-      transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
     >
       {children}
     </motion.nav>
@@ -138,7 +138,7 @@ export function NavbarLogo({
       aria-label="QingNest 轻巢 home"
       className={cn(
         showUnderline ? navUnderlineClass : "relative inline-flex h-10 items-center justify-center",
-        "h-11 gap-1 font-bold drop-shadow-[0_0_18px_rgba(125,211,252,0.28)]",
+        "h-11 gap-1 font-bold",
         className
       )}
       href="#"
@@ -156,7 +156,7 @@ export function NavbarLogo({
       ) : (
         <motion.span
           animate={{ opacity: 1 }}
-          className="inline-flex h-[1.6rem] w-[5.7rem] shrink-0 items-center bg-gradient-to-r from-white via-cyan-100 to-sky-200 bg-clip-text text-lg font-bold text-transparent [text-shadow:0_0_18px_rgba(125,211,252,0.24)] sm:h-7 sm:w-[6.35rem] sm:text-xl"
+          className="inline-flex h-[1.6rem] w-[5.7rem] shrink-0 items-center text-lg font-bold text-white sm:h-7 sm:w-[6.35rem] sm:text-xl"
           initial={animateSubtitle ? { opacity: 0 } : false}
           transition={{ duration: 0.18, ease: "easeOut" }}
         >
@@ -165,7 +165,7 @@ export function NavbarLogo({
       )}
       <motion.span
         animate={{ opacity: 1, x: 0 }}
-        className="text-base font-semibold text-cyan-100 sm:text-lg"
+        className="text-base font-semibold text-zinc-300 sm:text-lg"
         initial={animateSubtitle ? { opacity: 0, x: 0 } : false}
         transition={{ delay: animateSubtitle ? 0.68 : 0, duration: 0.26, ease: "easeOut" }}
       >
@@ -214,7 +214,7 @@ export function MobileNav({ children, className }: { children: ReactNode; classN
         backgroundColor: compact ? "rgba(0, 0, 0, 0.38)" : "rgba(0, 0, 0, 0.08)"
       }}
       className={cn("w-full backdrop-blur-xl md:hidden", className)}
-      transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
     >
       {children}
     </motion.nav>

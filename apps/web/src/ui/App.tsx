@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
+import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { getCurrentAccount, setAccessTokenProvider, type AccountProfile } from "@/lib/api";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { SiteNavbar } from "@/app/SiteNavbar";
@@ -16,14 +16,17 @@ import {
   isStudioPathname,
   STUDIO_ADMIN_PATH,
   STUDIO_PATH,
+  STUDIO_PROJECTS_PATH,
   STUDIO_PROFILE_PATH
 } from "@/app/navigation";
-import { LoadingScreen } from "@/app/feedback";
+import { StudioLoading } from "@/app/feedback";
 import { AdminPage } from "@/pages/AdminPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { HomePage } from "@/pages/HomePage";
 import { ProfilePage } from "@/pages/ProfilePage";
+import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
+import { ProjectsPage } from "@/pages/ProjectsPage";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 
@@ -41,11 +44,11 @@ export function App() {
 
   const pathname = location.pathname;
   const isHomeRoute = isHomePathname(pathname);
-  const firstScreen = isHomeRoute && page === 0;
   const isLegacyProtectedRoute = pathname === "/app" || pathname === "/profile" || pathname === "/admin";
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
+  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
 
   const navigate = useCallback((path: string, options: { replace?: boolean } = {}) => {
     if (typeof window === "undefined") return;
@@ -254,7 +257,12 @@ export function App() {
   } else if (pathname === "/auth") {
     routeContent = <AuthPage initialMode={authMode} onAuthenticated={setSession} onNavigate={navigate} status={authStatus} />;
   } else if (isProtectedRoute && authReady && !session) {
-    routeContent = <LoadingScreen label="正在跳转登录" />;
+    routeContent = <StudioLoading account={account} active={studioActive} label="正在跳转登录" onNavigate={navigate} />;
+  } else if (pathname === STUDIO_PROJECTS_PATH) {
+    routeContent = <ProjectsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
+  } else if (pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`)) {
+    const siteId = decodeURIComponent(pathname.slice(STUDIO_PROJECTS_PATH.length + 1));
+    routeContent = <ProjectDetailPage account={account} authReady={authReady} onNavigate={navigate} session={session} siteId={siteId} />;
   } else if (pathname === STUDIO_PROFILE_PATH || pathname === "/profile") {
     routeContent = <ProfilePage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else if (pathname === STUDIO_ADMIN_PATH || pathname === "/admin") {
@@ -263,22 +271,18 @@ export function App() {
     routeContent = <DashboardPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   }
 
+  // This wrapper only mounts when entering Studio. Its child changes in place,
+  // so switching between Studio sections is immediate.
   const displayedRouteContent = isStudioPathname(pathname) ? (
-    <AnimatePresence mode="wait">
-      <motion.div
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="min-h-dvh"
-        exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 8, scale: 0.998 }}
-        initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.996 }}
-        key="studio"
-        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-      >
-        {routeContent}
-      </motion.div>
-    </AnimatePresence>
-  ) : (
-    routeContent
-  );
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="min-h-dvh"
+      initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {routeContent}
+    </motion.div>
+  ) : routeContent;
 
   return (
     <main className={cn("fixed inset-0 h-dvh w-screen bg-black text-white", isHomeRoute ? "overflow-hidden" : "overflow-y-auto")}>
@@ -288,7 +292,6 @@ export function App() {
           animateBrand={animateBrand}
           authReady={authReady}
           compact={page !== 0 || !isHomeRoute}
-          firstScreen={firstScreen}
           isAuthenticated={Boolean(session && isSessionEmailConfirmed(session))}
           onNavigate={navigate}
         />

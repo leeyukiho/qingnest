@@ -1,8 +1,10 @@
 import { Loader2, LogIn } from "lucide-react";
-import { AuroraHero } from "@/components/ui/hero-2";
 import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
 import { CONTENT_TRACK_CLASS, PRIMARY_CTA_BUTTON_CLASS } from "@/app/ui";
 import { cn } from "@/lib/utils";
+import { StudioSidebar } from "@/app/StudioSidebar";
+import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_MAIN_CLASS, STUDIO_SECTION_CLASS } from "@/app/ui";
+import type { AccountProfile } from "@/lib/api";
 
 export function RouteMessage({
   actionLabel,
@@ -18,7 +20,7 @@ export function RouteMessage({
   title: string;
 }) {
   return (
-    <AuroraHero className="min-h-dvh">
+    <div className="min-h-dvh bg-black">
       <section className={cn(CONTENT_TRACK_CLASS, "flex min-h-dvh items-center pt-20")}>
         <div className="max-w-xl">
           <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/10 text-white">
@@ -37,19 +39,47 @@ export function RouteMessage({
           </HoverBorderGradient>
         </div>
       </section>
-    </AuroraHero>
+    </div>
   );
 }
 
-export function LoadingScreen({ label }: { label: string }) {
+export function LoadingScreen({ label }: { label: string }) {
   return (
-    <AuroraHero className="min-h-dvh">
+    <div className="min-h-dvh bg-black">
       <section className={cn(CONTENT_TRACK_CLASS, "flex min-h-dvh items-center justify-center pt-20")}>
         <div className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-zinc-200">
           <Loader2 className="h-4 w-4 animate-spin" />
           {label}
         </div>
       </section>
-    </AuroraHero>
+    </div>
   );
+}
+
+export function StudioLoading({
+  account,
+  active,
+  label,
+  onNavigate
+}: {
+  account: AccountProfile | null;
+  active: "create" | "projects" | "profile" | "admin";
+  label: string;
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <div className="min-h-dvh bg-black">
+      <section className={STUDIO_SECTION_CLASS}>
+        <div className={STUDIO_CONTENT_SHELL_CLASS}>
+          <StudioSidebar account={account} active={active} onNavigate={onNavigate} />
+          <div className={`${STUDIO_MAIN_CLASS} flex min-h-[55vh] items-center justify-center`}>
+            <div className="inline-flex items-center gap-3 rounded-md border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-zinc-300">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {label}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }

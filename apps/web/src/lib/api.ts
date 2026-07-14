@@ -63,7 +63,26 @@ export type SiteDraft = {
   name: string;
   subdomain: string;
   publicUrl: string;
-  status: "draft" | "pending_review" | "active";
+  status: "draft" | "pending_review" | "active" | "blocked";
+};
+
+export type ProjectSummary = SiteDraft & {
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DeploymentSummary = {
+  id: string;
+  version: number;
+  status: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
+  fileCount: number;
+  totalBytes: number;
+  createdAt: string;
+  activatedAt: string | null;
+};
+
+export type ProjectDetail = ProjectSummary & {
+  deployments: DeploymentSummary[];
 };
 
 export type UploadArchiveResult = {
@@ -139,6 +158,21 @@ export async function checkSubdomain(subdomain: string) {
 export async function createSite(input: { name: string; subdomain: string }) {
   return request<SiteDraft>("/api/sites", {
     method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function listProjects() {
+  return request<ProjectSummary[]>("/api/sites");
+}
+
+export async function getProject(siteId: string) {
+  return request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`);
+}
+
+export async function updateProject(siteId: string, input: { name: string }) {
+  return request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`, {
+    method: "PATCH",
     body: JSON.stringify(input)
   });
 }
