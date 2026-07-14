@@ -124,3 +124,22 @@ app.985201314.xyz/*         -> no Worker / bypass to Pages
 
 The console API route is needed when `VITE_API_BASE_URL` is empty.
 The console bypass route prevents the wildcard user-site route from taking over the Pages console.
+
+## Rate Limiting
+
+Create a Cloudflare rate limiting rule in the `985201314.xyz` zone so abusive availability
+checks are rejected before they invoke the Worker.
+
+```text
+Rule name:       subdomain-availability-check
+Expression:      http.host eq "app.985201314.xyz"
+                 and http.request.uri.path eq "/api/subdomains/check"
+Method:          GET
+Characteristics: IP
+Threshold:       30 requests per 1 minute
+Mitigation:      Block for 1 minute
+```
+
+The application also debounces and caches normal checks and applies a best-effort Worker-instance
+limit. The zone-level rule is still required because application limits only run after a request
+has already consumed a Worker invocation.

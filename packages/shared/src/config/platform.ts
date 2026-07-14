@@ -44,11 +44,11 @@ export function validateSubdomain(subdomain: string) {
   const policy = platformConfig.subdomainPolicy;
   const pattern = new RegExp(policy.pattern);
 
-  if (normalized.length < policy.minLength || normalized.length > policy.maxLength) {
+  if (normalized.length > policy.maxLength) {
     return {
       ok: false,
       normalized,
-      reason: `子域名长度必须是 ${policy.minLength}-${policy.maxLength} 个字符`
+      reason: `地址前缀最长不能超过 ${policy.maxLength} 个字符`
     };
   }
 
@@ -72,7 +72,16 @@ export function validateSubdomain(subdomain: string) {
     return {
       ok: false,
       normalized,
-      reason: "这个子域名是平台保留词"
+      reason: "这个子域名已被占用"
+    };
+  }
+
+  const segments = normalized.split("-");
+  if (policy.blockedKeywords.some((keyword) => segments.includes(keyword))) {
+    return {
+      ok: false,
+      normalized,
+      reason: "这个子域名已被占用"
     };
   }
 

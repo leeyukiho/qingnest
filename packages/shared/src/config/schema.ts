@@ -57,11 +57,11 @@ export const platformConfigSchema = z.object({
     publicProtocol: z.enum(["http", "https"])
   }),
   subdomainPolicy: z.object({
-    minLength: z.number().int().positive(),
     maxLength: z.number().int().positive(),
     pattern: z.string(),
     disallowConsecutiveHyphen: z.boolean(),
     reserved: z.array(z.string()),
+    blockedKeywords: z.array(z.string()),
     manualReviewKeywords: z.array(z.string())
   }),
   plans: z.record(planSchema),

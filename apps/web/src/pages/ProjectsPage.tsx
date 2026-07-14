@@ -5,7 +5,7 @@ import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
 import { getStatusLabel } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
-import { STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { STUDIO_DOMAINS_PATH, STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
 import { getCachedProjects, listProjects, type AccountProfile, type ProjectSummary } from "@/lib/api";
 
@@ -19,6 +19,10 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
   const [projects, setProjects] = useState<ProjectSummary[]>(cachedProjects ?? []);
   const [loading, setLoading] = useState(!cachedProjects);
   const [error, setError] = useState<string | null>(null);
+  const sortedProjects = [...projects].sort((left, right) => {
+    if (left.visibility !== right.visibility) return left.visibility === "public" ? -1 : 1;
+    return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  });
 
   useEffect(() => {
     if (!session) return;
@@ -49,21 +53,21 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
               </div>
             ) : (
               <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {projects.map((project) => (
-                  <article className={`${STUDIO_PANEL_CLASS} flex min-h-44 flex-col p-5`} key={project.id}>
+                {sortedProjects.map((project) => (
+                  <article className={`${STUDIO_PANEL_CLASS} flex min-h-48 flex-col p-5 ${project.visibility === "public" ? "border-white/45 bg-white/[0.025]" : "border-white/15"}`} key={project.id}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="truncate text-base font-semibold text-white">{project.name}</h2>
-                        <p className="mt-2 flex items-center gap-1.5 truncate text-sm text-zinc-500">{project.visibility === "public" ? <Globe2 className="h-3.5 w-3.5 shrink-0" /> : <Lock className="h-3.5 w-3.5 shrink-0" />}{project.visibility === "public" ? "已绑定公开域名" : "仅自己可见"}</p>
+                        {project.visibility === "public" ? <a className="mt-2 flex min-w-0 items-center gap-1.5 text-sm text-zinc-300 transition-colors hover:text-white" href={project.publicUrl} rel="noreferrer" target="_blank"><Globe2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{project.publicUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span><ExternalLink className="h-3.5 w-3.5 shrink-0" /></a> : <p className="mt-2 flex items-center gap-1.5 text-sm text-zinc-500"><Lock className="h-3.5 w-3.5 shrink-0" />仅自己可见</p>}
                       </div>
-                      <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-zinc-400">{project.visibility === "public" ? "已公开" : getStatusLabel(project.status)}</span>
+                      <span className={`shrink-0 rounded-md border px-2 py-1 text-xs font-medium ${project.visibility === "public" ? "border-emerald-400/35 bg-emerald-400/10 text-emerald-300" : "border-white/10 text-zinc-500"}`}>{project.visibility === "public" ? "公开中" : getStatusLabel(project.status)}</span>
                     </div>
                     <p className="mt-5 text-xs text-zinc-600">更新于 {new Date(project.updatedAt).toLocaleString("zh-CN")}</p>
                     <div className="mt-auto flex items-center gap-2 pt-5">
                       <button className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-md bg-white/10 px-3 text-sm font-medium text-zinc-100 transition-colors hover:bg-white/15" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}`)} type="button">
                         管理项目<ArrowRight className="h-4 w-4" />
                       </button>
-                      {project.publicUrl ? <a className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white" href={project.publicUrl} rel="noreferrer" target="_blank">访问网站<ExternalLink className="h-4 w-4" /></a> : <button className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-500 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}?tab=publishing`)} type="button">绑定域名<Globe2 className="h-4 w-4" /></button>}
+                      {project.publicUrl ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(STUDIO_DOMAINS_PATH)} type="button">管理域名<Globe2 className="h-4 w-4" /></button> : <button className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-500 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}?tab=publishing`)} type="button">绑定域名<Globe2 className="h-4 w-4" /></button>}
                     </div>
                   </article>
                 ))}

@@ -145,8 +145,9 @@ maxSiteBytes=50 MB
 maxFileBytes=10 MB
 ```
 
-To change domain blacklist/manual-review rules, edit `subdomainPolicy.reserved` and
-`subdomainPolicy.manualReviewKeywords` in `packages/shared/config/platform.json`. To change upload
+To change domain blacklist/manual-review rules, edit `subdomainPolicy.reserved`,
+`subdomainPolicy.blockedKeywords`, and `subdomainPolicy.manualReviewKeywords` in
+`packages/shared/config/platform.json`. These prefix rules apply to every platform root domain. To change upload
 size or quota limits, edit the relevant `plans.free.quotas` values in the same file. Keep these
 limits conservative unless you upgrade Supabase, R2, and Worker capacity together.
 

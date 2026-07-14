@@ -1,4 +1,7 @@
-import type { DeploymentScanIssue, DeploymentScanResult } from "@qingnest/shared/deployment/types";
+import type {
+  DeploymentScanIssue,
+  DeploymentScanResult,
+} from "@qingnest/shared/deployment/types";
 
 type ApiResult<T> = {
   ok: boolean;
@@ -9,7 +12,9 @@ type ApiResult<T> = {
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 let accessTokenProvider: (() => Promise<string | null>) | null = null;
 
-export function setAccessTokenProvider(provider: (() => Promise<string | null>) | null) {
+export function setAccessTokenProvider(
+  provider: (() => Promise<string | null>) | null,
+) {
   accessTokenProvider = provider;
 }
 
@@ -20,8 +25,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {})
-    }
+      ...(init?.headers ?? {}),
+    },
   });
   const payload = (await response.json()) as ApiResult<T>;
 
@@ -37,9 +42,9 @@ async function formRequest<T>(path: string, formData: FormData): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
     headers: {
-      ...(token ? { authorization: `Bearer ${token}` } : {})
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
-    body: formData
+    body: formData,
   });
   const payload = (await response.json()) as ApiResult<T>;
 
@@ -75,7 +80,14 @@ export type ProjectSummary = SiteDraft & {
 export type DeploymentSummary = {
   id: string;
   version: number;
-  status: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
+  status:
+    | "uploading"
+    | "scanning"
+    | "active"
+    | "failed"
+    | "blocked"
+    | "pending_review"
+    | "superseded";
   fileCount: number;
   totalBytes: number;
   createdAt: string;
@@ -127,6 +139,10 @@ const projectCache = new Map<string, ProjectDetail>();
 const projectCachedAt = new Map<string, number>();
 let publicSlotsCache: PublicSlot[] | null = null;
 let publicSlotsCachedAt = 0;
+const subdomainCheckCache = new Map<
+  string,
+  { expiresAt: number; request: Promise<SubdomainCheck> }
+>();
 
 function notifyAccountChanged() {
   window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT));
@@ -137,7 +153,10 @@ function updateProjectCaches(project: ProjectDetail) {
   projectCachedAt.set(project.id, Date.now());
   if (projectsCache) {
     const summary: ProjectSummary = project;
-    projectsCache = [summary, ...projectsCache.filter((item) => item.id !== project.id)];
+    projectsCache = [
+      summary,
+      ...projectsCache.filter((item) => item.id !== project.id),
+    ];
   }
 }
 
@@ -184,7 +203,7 @@ export async function signUpWithEmailPassword(input: {
 }) {
   return request<SignUpConfirmationResult>("/api/auth/sign-up", {
     method: "POST",
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
@@ -197,17 +216,35 @@ export async function getAdminOverview() {
 }
 
 export async function checkSubdomain(subdomain: string) {
-  const params = new URLSearchParams({ subdomain });
-  return request<SubdomainCheck>(`/api/subdomains/check?${params}`);
+  const normalized = subdomain.trim().toLowerCase();
+  const cached = subdomainCheckCache.get(normalized);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+
+  if (subdomainCheckCache.size >= 100) {
+    const oldestKey = subdomainCheckCache.keys().next().value;
+    if (oldestKey) subdomainCheckCache.delete(oldestKey);
+  }
+
+  const params = new URLSearchParams({ subdomain: normalized });
+  const pending = request<SubdomainCheck>(`/api/subdomains/check?${params}`);
+  subdomainCheckCache.set(normalized, {
+    expiresAt: Date.now() + 15_000,
+    request: pending,
+  });
+  pending.catch(() => subdomainCheckCache.delete(normalized));
+  return pending;
 }
 
 export async function createSite(input: { name: string }) {
   const site = await request<SiteDraft>("/api/sites", {
     method: "POST",
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
   const now = new Date().toISOString();
-  projectsCache = [{ ...site, createdAt: now, updatedAt: now }, ...(projectsCache ?? [])];
+  projectsCache = [
+    { ...site, createdAt: now, updatedAt: now },
+    ...(projectsCache ?? []),
+  ];
   projectsCachedAt = Date.now();
   notifyAccountChanged();
   return site;
@@ -223,48 +260,105 @@ export type PublicSlot = {
 };
 
 export async function listPublicSlots() {
-  if (publicSlotsCache && Date.now() - publicSlotsCachedAt < READ_CACHE_TTL_MS) return publicSlotsCache;
+  if (publicSlotsCache && Date.now() - publicSlotsCachedAt < READ_CACHE_TTL_MS)
+    return publicSlotsCache;
   const slots = await request<PublicSlot[]>("/api/public-slots");
   publicSlotsCache = slots;
   publicSlotsCachedAt = Date.now();
   return slots;
 }
 
-export async function createPublicSlot(input: { siteId: string; subdomain: string }) {
-  const slot = await request<PublicSlot>("/api/public-slots", { method: "POST", body: JSON.stringify(input) });
+export async function createPublicSlot(input: {
+  siteId: string;
+  subdomain: string;
+}) {
+  const slot = await request<PublicSlot>("/api/public-slots", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
   publicSlotsCache = null;
   publicSlotsCachedAt = 0;
-  if (projectsCache) projectsCache = projectsCache.map((project) => project.id === input.siteId ? { ...project, subdomain: slot.hostname.split(".")[0] ?? slot.hostname, publicUrl: slot.publicUrl, visibility: "public" } : project);
+  subdomainCheckCache.delete(input.subdomain.trim().toLowerCase());
+  if (projectsCache)
+    projectsCache = projectsCache.map((project) =>
+      project.id === input.siteId
+        ? {
+            ...project,
+            subdomain: slot.hostname.split(".")[0] ?? slot.hostname,
+            publicUrl: slot.publicUrl,
+            visibility: "public",
+          }
+        : project,
+    );
   projectCache.delete(input.siteId);
   projectCachedAt.delete(input.siteId);
   notifyAccountChanged();
   return slot;
 }
 
+export async function rentPublicSlot(subdomain: string) {
+  const slot = await request<PublicSlot>("/api/public-slots/rent", {
+    method: "POST",
+    body: JSON.stringify({ subdomain }),
+  });
+  publicSlotsCache = null;
+  publicSlotsCachedAt = 0;
+  subdomainCheckCache.delete(subdomain.trim().toLowerCase());
+  notifyAccountChanged();
+  return slot;
+}
+
 export async function switchPublicSlot(slotId: string, siteId: string | null) {
-  const previousSiteId = publicSlotsCache?.find((slot) => slot.id === slotId)?.siteId;
-  const slot = await request<PublicSlot>(`/api/public-slots/${encodeURIComponent(slotId)}`, { method: "PATCH", body: JSON.stringify({ siteId }) });
+  const previousSiteId = publicSlotsCache?.find(
+    (slot) => slot.id === slotId,
+  )?.siteId;
+  const slot = await request<PublicSlot>(
+    `/api/public-slots/${encodeURIComponent(slotId)}`,
+    { method: "PATCH", body: JSON.stringify({ siteId }) },
+  );
   publicSlotsCache = null;
   publicSlotsCachedAt = 0;
   if (projectsCache) {
     projectsCache = projectsCache.map((project) => {
-      if (project.id === previousSiteId && previousSiteId !== siteId) return { ...project, subdomain: "", publicUrl: "", visibility: "private" };
-      if (project.id === siteId) return { ...project, subdomain: slot.hostname.split(".")[0] ?? slot.hostname, publicUrl: slot.publicUrl, visibility: "public" };
+      if (project.id === previousSiteId && previousSiteId !== siteId)
+        return {
+          ...project,
+          subdomain: "",
+          publicUrl: "",
+          visibility: "private",
+        };
+      if (project.id === siteId)
+        return {
+          ...project,
+          subdomain: slot.hostname.split(".")[0] ?? slot.hostname,
+          publicUrl: slot.publicUrl,
+          visibility: "public",
+        };
       return project;
     });
   }
-  if (previousSiteId) { projectCache.delete(previousSiteId); projectCachedAt.delete(previousSiteId); }
-  if (siteId) { projectCache.delete(siteId); projectCachedAt.delete(siteId); }
+  if (previousSiteId) {
+    projectCache.delete(previousSiteId);
+    projectCachedAt.delete(previousSiteId);
+  }
+  if (siteId) {
+    projectCache.delete(siteId);
+    projectCachedAt.delete(siteId);
+  }
   notifyAccountChanged();
   return slot;
 }
 
 export async function createPrivatePreview(siteId: string) {
-  return request<{ url: string; expiresAt: string }>(`/api/sites/${encodeURIComponent(siteId)}/preview`, { method: "POST" });
+  return request<{ url: string; expiresAt: string }>(
+    `/api/sites/${encodeURIComponent(siteId)}/preview`,
+    { method: "POST" },
+  );
 }
 
 export async function listProjects() {
-  if (projectsCache && Date.now() - projectsCachedAt < READ_CACHE_TTL_MS) return projectsCache;
+  if (projectsCache && Date.now() - projectsCachedAt < READ_CACHE_TTL_MS)
+    return projectsCache;
   const projects = await request<ProjectSummary[]>("/api/sites");
   projectsCache = projects;
   projectsCachedAt = Date.now();
@@ -273,19 +367,41 @@ export async function listProjects() {
 
 export async function getProject(siteId: string) {
   const cached = projectCache.get(siteId);
-  if (cached && Date.now() - (projectCachedAt.get(siteId) ?? 0) < READ_CACHE_TTL_MS) return cached;
-  const project = await request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`);
+  if (
+    cached &&
+    Date.now() - (projectCachedAt.get(siteId) ?? 0) < READ_CACHE_TTL_MS
+  )
+    return cached;
+  const project = await request<ProjectDetail>(
+    `/api/sites/${encodeURIComponent(siteId)}`,
+  );
   updateProjectCaches(project);
   return project;
 }
 
 export async function updateProject(siteId: string, input: { name: string }) {
-  const project = await request<ProjectDetail>(`/api/sites/${encodeURIComponent(siteId)}`, {
-    method: "PATCH",
-    body: JSON.stringify(input)
-  });
+  const project = await request<ProjectDetail>(
+    `/api/sites/${encodeURIComponent(siteId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
+  );
   updateProjectCaches(project);
   return project;
+}
+
+export async function deleteProject(siteId: string) {
+  await request<{ id: string }>(`/api/sites/${encodeURIComponent(siteId)}`, {
+    method: "DELETE",
+  });
+  projectsCache =
+    projectsCache?.filter((project) => project.id !== siteId) ?? null;
+  projectCache.delete(siteId);
+  projectCachedAt.delete(siteId);
+  publicSlotsCache = null;
+  publicSlotsCachedAt = 0;
+  notifyAccountChanged();
 }
 
 export async function createUploadSession(input: {
@@ -298,7 +414,7 @@ export async function createUploadSession(input: {
     status: "uploading" | "pending_review" | "blocked";
   }>("/api/upload-sessions", {
     method: "POST",
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
   });
 }
 
@@ -313,7 +429,7 @@ export async function uploadArchive(input: {
 
   const result = await formRequest<UploadArchiveResult>(
     `/api/upload-sessions/${encodeURIComponent(input.uploadSessionId)}/archive`,
-    formData
+    formData,
   );
   projectCache.clear();
   projectCachedAt.clear();
@@ -336,12 +452,10 @@ export async function uploadFiles(input: {
 
   const result = await formRequest<UploadArchiveResult>(
     `/api/upload-sessions/${encodeURIComponent(input.uploadSessionId)}/files`,
-    formData
+    formData,
   );
   projectCache.clear();
   projectCachedAt.clear();
   notifyAccountChanged();
   return result;
 }
-
-

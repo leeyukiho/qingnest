@@ -1,4 +1,7 @@
-import { getPublicSiteUrl, validateSubdomain } from "@qingnest/shared/config/platform";
+import {
+  getPublicSiteUrl,
+  validateSubdomain,
+} from "@qingnest/shared/config/platform";
 import { scanDeploymentFiles } from "@qingnest/shared/deployment/scan";
 import type { DeploymentScanResult } from "@qingnest/shared/deployment/types";
 import { json, problem, readJson } from "./http";
@@ -11,15 +14,17 @@ import {
   createPublicSlot,
   createPrivatePreview,
   createUploadSession,
+  deleteProject,
   getAccountProfile,
   getAdminOverview,
   getAuthenticatedUser,
   getProject,
   listProjects,
   listPublicSlots,
+  rentPublicSlot,
   switchPublicSlot,
   updateProjectName,
-  signUpWithEmailPassword
+  signUpWithEmailPassword,
 } from "./state";
 import { hasServiceSupabase } from "./supabase";
 import type { Env } from "./types";
@@ -29,6 +34,7 @@ type SiteCreateInput = {
 };
 
 type PublicSlotInput = { siteId?: string; subdomain?: string };
+type PublicSlotRentalInput = { subdomain?: string };
 type PublicSlotUpdateInput = { siteId?: string | null };
 
 type SiteUpdateInput = { name?: string };
@@ -44,8 +50,52 @@ type SignUpInput = {
   redirectTo?: string;
 };
 
+const subdomainCheckWindows = new Map<
+  string,
+  { count: number; startedAt: number }
+>();
+const SUBDOMAIN_CHECK_WINDOW_MS = 60_000;
+const SUBDOMAIN_CHECK_LIMIT = 30;
+
+function getSubdomainCheckRetryAfter(request: Request) {
+  const clientIp = request.headers.get("cf-connecting-ip");
+  if (!clientIp) return 0;
+
+  const now = Date.now();
+  const current = subdomainCheckWindows.get(clientIp);
+  if (!current || now - current.startedAt >= SUBDOMAIN_CHECK_WINDOW_MS) {
+    if (subdomainCheckWindows.size >= 1_000) {
+      for (const [key, window] of subdomainCheckWindows) {
+        if (now - window.startedAt >= SUBDOMAIN_CHECK_WINDOW_MS)
+          subdomainCheckWindows.delete(key);
+      }
+      if (subdomainCheckWindows.size >= 1_000) {
+        const oldestKey = subdomainCheckWindows.keys().next().value;
+        if (oldestKey) subdomainCheckWindows.delete(oldestKey);
+      }
+    }
+    subdomainCheckWindows.set(clientIp, { count: 1, startedAt: now });
+    return 0;
+  }
+
+  current.count += 1;
+  if (current.count <= SUBDOMAIN_CHECK_LIMIT) return 0;
+
+  return Math.max(
+    1,
+    Math.ceil(
+      (SUBDOMAIN_CHECK_WINDOW_MS - (now - current.startedAt)) / 1_000,
+    ),
+  );
+}
+
 function isUploadedFile(value: unknown): value is File {
-  return typeof value === "object" && value !== null && "arrayBuffer" in value && "name" in value;
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "arrayBuffer" in value &&
+    "name" in value
+  );
 }
 
 function getFormFiles(formData: FormData, fieldName: string): File[] {
@@ -63,9 +113,11 @@ function getFormFiles(formData: FormData, fieldName: string): File[] {
 async function maybeGetUser(
   request: Request,
   env: Env,
-  options: { requireEmailConfirmed?: boolean } = {}
+  options: { requireEmailConfirmed?: boolean } = {},
 ) {
-  return hasServiceSupabase(env) ? await getAuthenticatedUser(request, env, options) : undefined;
+  return hasServiceSupabase(env)
+    ? await getAuthenticatedUser(request, env, options)
+    : undefined;
 }
 
 export async function handleApi(request: Request, env: Env) {
@@ -77,7 +129,7 @@ export async function handleApi(request: Request, env: Env) {
       return json({
         service: "worker-api",
         environment: env.ENVIRONMENT,
-        supabaseConfigured: hasServiceSupabase(env)
+        supabaseConfigured: hasServiceSupabase(env),
       });
     }
 
@@ -87,8 +139,8 @@ export async function handleApi(request: Request, env: Env) {
         domains: platformConfig.domains,
         subdomainPolicy: platformConfig.subdomainPolicy,
         plans: {
-          free: platformConfig.plans.free
-        }
+          free: platformConfig.plans.free,
+        },
       });
     }
 
@@ -98,7 +150,9 @@ export async function handleApi(request: Request, env: Env) {
     }
 
     if (request.method === "GET" && url.pathname === "/api/me") {
-      const user = await maybeGetUser(request, env, { requireEmailConfirmed: false });
+      const user = await maybeGetUser(request, env, {
+        requireEmailConfirmed: false,
+      });
 
       if (!user) {
         return problem("请先登录", 401);
@@ -108,7 +162,9 @@ export async function handleApi(request: Request, env: Env) {
     }
 
     if (request.method === "GET" && url.pathname === "/api/admin/overview") {
-      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      const user = await maybeGetUser(request, env, {
+        requireEmailConfirmed: true,
+      });
 
       if (!user) {
         return problem("请先登录", 401);
@@ -118,6 +174,12 @@ export async function handleApi(request: Request, env: Env) {
     }
 
     if (request.method === "GET" && url.pathname === "/api/subdomains/check") {
+      const retryAfter = getSubdomainCheckRetryAfter(request);
+      if (retryAfter > 0) {
+        const response = problem("检查过于频繁，请稍后再试", 429);
+        response.headers.set("retry-after", String(retryAfter));
+        return response;
+      }
       const subdomain = url.searchParams.get("subdomain") ?? "";
       const validation = validateSubdomain(subdomain);
 
@@ -125,18 +187,27 @@ export async function handleApi(request: Request, env: Env) {
         return json({
           available: false,
           normalized: validation.normalized,
-          reason: validation.reason
+          reason: validation.reason,
         });
       }
 
-      const result = await checkSubdomainAvailability(env, validation.normalized);
-      return json({
-        available: result.available,
-        normalized: result.normalized,
-        requiresReview: result.requiresReview,
-        publicUrl: getPublicSiteUrl(result.normalized, platformConfig.domains),
-        reason: result.reason
-      });
+      const result = await checkSubdomainAvailability(
+        env,
+        validation.normalized,
+      );
+      return json(
+        {
+          available: result.available,
+          normalized: result.normalized,
+          requiresReview: result.requiresReview,
+          publicUrl: getPublicSiteUrl(
+            result.normalized,
+            platformConfig.domains,
+          ),
+          reason: result.reason,
+        },
+        { headers: { "cache-control": "private, max-age=15" } },
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/sites") {
@@ -145,7 +216,7 @@ export async function handleApi(request: Request, env: Env) {
       const user = await maybeGetUser(request, env);
       const site = await createDraftSite(env, {
         name: input.name?.trim() || "未命名站点",
-        user
+        user,
       });
       return json(site, { status: 201 });
     }
@@ -163,10 +234,35 @@ export async function handleApi(request: Request, env: Env) {
 
     if (request.method === "POST" && url.pathname === "/api/public-slots") {
       const input = await readJson<PublicSlotInput>(request);
-      if (!input.siteId || !input.subdomain) return problem("缺少项目或公开地址");
+      if (!input.siteId || !input.subdomain)
+        return problem("缺少项目或公开地址");
       const user = await maybeGetUser(request, env);
       if (!user) return problem("请先登录", 401);
-      return json(await createPublicSlot(env, { siteId: input.siteId, subdomain: input.subdomain, user }), { status: 201 });
+      return json(
+        await createPublicSlot(env, {
+          siteId: input.siteId,
+          subdomain: input.subdomain,
+          user,
+        }),
+        { status: 201 },
+      );
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/api/public-slots/rent"
+    ) {
+      const input = await readJson<PublicSlotRentalInput>(request);
+      if (!input.subdomain) return problem("请输入地址前缀", 400);
+      const user = await maybeGetUser(request, env);
+      if (!user) return problem("请先登录", 401);
+      return json(
+        await rentPublicSlot(env, {
+          subdomain: input.subdomain,
+          user,
+        }),
+        { status: 201 },
+      );
     }
 
     const slotMatch = url.pathname.match(/^\/api\/public-slots\/([^/]+)$/);
@@ -174,26 +270,54 @@ export async function handleApi(request: Request, env: Env) {
       const input = await readJson<PublicSlotUpdateInput>(request);
       const user = await maybeGetUser(request, env);
       if (!user) return problem("请先登录", 401);
-      return json(await switchPublicSlot(env, { slotId: decodeURIComponent(slotMatch[1] ?? ""), siteId: input.siteId ?? null, user }));
+      return json(
+        await switchPublicSlot(env, {
+          slotId: decodeURIComponent(slotMatch[1] ?? ""),
+          siteId: input.siteId ?? null,
+          user,
+        }),
+      );
     }
 
     const siteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)$/);
     if (request.method === "GET" && siteMatch) {
       const user = await maybeGetUser(request, env);
-      return json(await getProject(env, decodeURIComponent(siteMatch[1] ?? ""), user));
+      return json(
+        await getProject(env, decodeURIComponent(siteMatch[1] ?? ""), user),
+      );
     }
 
     if (request.method === "PATCH" && siteMatch) {
       const input = await readJson<SiteUpdateInput>(request);
       const user = await maybeGetUser(request, env);
-      return json(await updateProjectName(env, decodeURIComponent(siteMatch[1] ?? ""), input.name ?? "", user));
+      return json(
+        await updateProjectName(
+          env,
+          decodeURIComponent(siteMatch[1] ?? ""),
+          input.name ?? "",
+          user,
+        ),
+      );
+    }
+
+    if (request.method === "DELETE" && siteMatch) {
+      const user = await maybeGetUser(request, env);
+      return json(
+        await deleteProject(env, decodeURIComponent(siteMatch[1] ?? ""), user),
+      );
     }
 
     const previewMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/preview$/);
     if (request.method === "POST" && previewMatch) {
       const user = await maybeGetUser(request, env);
       if (!user) return problem("请先登录", 401);
-      return json(await createPrivatePreview(env, { siteId: decodeURIComponent(previewMatch[1] ?? ""), user, origin: url.origin }));
+      return json(
+        await createPrivatePreview(env, {
+          siteId: decodeURIComponent(previewMatch[1] ?? ""),
+          user,
+          origin: url.origin,
+        }),
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/upload-sessions") {
@@ -205,7 +329,7 @@ export async function handleApi(request: Request, env: Env) {
 
       const trustedScan = scanDeploymentFiles(
         input.scan.files.map((file) => ({ path: file.path, size: file.size })),
-        "free"
+        "free",
       );
       const user = await maybeGetUser(request, env);
 
@@ -219,15 +343,18 @@ export async function handleApi(request: Request, env: Env) {
           riskLevel:
             input.scan.riskLevel === "high" || trustedScan.riskLevel === "high"
               ? "high"
-              : input.scan.riskLevel === "medium" || trustedScan.riskLevel === "medium"
+              : input.scan.riskLevel === "medium" ||
+                  trustedScan.riskLevel === "medium"
                 ? "medium"
-                : "low"
-        }
+                : "low",
+        },
       });
       return json(result, { status: 201 });
     }
 
-    const uploadArchiveMatch = url.pathname.match(/^\/api\/upload-sessions\/([^/]+)\/archive$/);
+    const uploadArchiveMatch = url.pathname.match(
+      /^\/api\/upload-sessions\/([^/]+)\/archive$/,
+    );
 
     if (request.method === "POST" && uploadArchiveMatch) {
       const uploadSessionId = decodeURIComponent(uploadArchiveMatch[1] ?? "");
@@ -248,19 +375,23 @@ export async function handleApi(request: Request, env: Env) {
         uploadSessionId,
         deploymentId,
         archive,
-        user
+        user,
       });
       return json(result, { status: 201 });
     }
 
-    const uploadFilesMatch = url.pathname.match(/^\/api\/upload-sessions\/([^/]+)\/files$/);
+    const uploadFilesMatch = url.pathname.match(
+      /^\/api\/upload-sessions\/([^/]+)\/files$/,
+    );
 
     if (request.method === "POST" && uploadFilesMatch) {
       const uploadSessionId = decodeURIComponent(uploadFilesMatch[1] ?? "");
       const formData = await request.formData();
       const deploymentId = formData.get("deploymentId");
       const files = getFormFiles(formData, "files");
-      const paths = formData.getAll("paths").filter((path): path is string => typeof path === "string");
+      const paths = formData
+        .getAll("paths")
+        .filter((path): path is string => typeof path === "string");
 
       if (typeof deploymentId !== "string" || !deploymentId) {
         return problem("缺少部署 ID");
@@ -280,9 +411,9 @@ export async function handleApi(request: Request, env: Env) {
         deploymentId,
         files: files.map((file, index) => ({
           file,
-          path: paths[index] ?? file.name
+          path: paths[index] ?? file.name,
         })),
-        user
+        user,
       });
       return json(result, { status: 201 });
     }
@@ -291,7 +422,9 @@ export async function handleApi(request: Request, env: Env) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "服务异常";
     const status =
-      message.includes("管理员") || message.includes("邮箱") || message.includes("无权")
+      message.includes("管理员") ||
+      message.includes("邮箱") ||
+      message.includes("无权")
         ? 403
         : message.includes("登录") || message.includes("过期")
           ? 401
@@ -301,7 +434,10 @@ export async function handleApi(request: Request, env: Env) {
               ? 404
               : message.includes("不可用") || message.includes("已被")
                 ? 409
-                : message.includes("缺少") || message.includes("不能") || message.includes("无效") || message.includes("必须")
+                : message.includes("缺少") ||
+                    message.includes("不能") ||
+                    message.includes("无效") ||
+                    message.includes("必须")
                   ? 400
                   : 500;
     return problem(message, status);

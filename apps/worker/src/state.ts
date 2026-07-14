@@ -1,12 +1,28 @@
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
 import { unzipSync } from "fflate";
-import { getPlanConfig, getPublicSiteUrl, platformConfig, validateSubdomain } from "@qingnest/shared/config/platform";
+import {
+  getPlanConfig,
+  getPublicSiteUrl,
+  platformConfig,
+  validateSubdomain,
+} from "@qingnest/shared/config/platform";
 import { getContentType } from "@qingnest/shared/deployment/mime";
-import { prepareDeploymentFiles, type ScanInputFile } from "@qingnest/shared/deployment/scan";
-import type { DeploymentScanIssue, DeploymentScanResult } from "@qingnest/shared/deployment/types";
+import {
+  prepareDeploymentFiles,
+  type ScanInputFile,
+} from "@qingnest/shared/deployment/scan";
+import type {
+  DeploymentScanIssue,
+  DeploymentScanResult,
+} from "@qingnest/shared/deployment/types";
 import { getWorkerPlatformConfig } from "./platform";
-import { createAuthSupabase, createServiceSupabase, hasAuthSupabase, hasServiceSupabase } from "./supabase";
+import {
+  createAuthSupabase,
+  createServiceSupabase,
+  hasAuthSupabase,
+  hasServiceSupabase,
+} from "./supabase";
 import type { ProfileRole } from "./supabase";
 import type { DomainMapping, Env } from "./types";
 
@@ -27,14 +43,23 @@ export type ProjectSummary = DraftSite & {
 export type DeploymentSummary = {
   id: string;
   version: number;
-  status: "uploading" | "scanning" | "active" | "failed" | "blocked" | "pending_review" | "superseded";
+  status:
+    | "uploading"
+    | "scanning"
+    | "active"
+    | "failed"
+    | "blocked"
+    | "pending_review"
+    | "superseded";
   fileCount: number;
   totalBytes: number;
   createdAt: string;
   activatedAt: string | null;
 };
 
-export type ProjectDetail = ProjectSummary & { deployments: DeploymentSummary[] };
+export type ProjectDetail = ProjectSummary & {
+  deployments: DeploymentSummary[];
+};
 
 export type PublicSlot = {
   id: string;
@@ -59,7 +84,9 @@ type DeployableArchiveFile = ScanInputFile & {
   content: Uint8Array;
 };
 
-type PreparedDeployment = ReturnType<typeof prepareDeploymentFiles<DeployableArchiveFile>>;
+type PreparedDeployment = ReturnType<
+  typeof prepareDeploymentFiles<DeployableArchiveFile>
+>;
 
 export type AuthenticatedUser = {
   id: string;
@@ -101,7 +128,20 @@ const SIGNUP_CONFIRMATION_TTL_SECONDS = 24 * 60 * 60;
 const draftSites = new Map<string, DraftSite>();
 const claimedSubdomains = new Set<string>();
 const memoryUploadSessions = new Map<string, MemoryUploadSession>();
-const textPreviewExtensions = new Set([".html", ".htm", ".js", ".mjs", ".css", ".json", ".txt"]);
+const subdomainAvailabilityCache = new Map<
+  string,
+  { expiresAt: number; request: Promise<SubdomainAvailability> }
+>();
+const SUBDOMAIN_AVAILABILITY_CACHE_MS = 15_000;
+const textPreviewExtensions = new Set([
+  ".html",
+  ".htm",
+  ".js",
+  ".mjs",
+  ".css",
+  ".json",
+  ".txt",
+]);
 
 function getSiteAssets(env: Env) {
   if (!env.SITE_ASSETS) {
@@ -119,7 +159,11 @@ async function readDomainCache(env: Env, subdomain: string) {
   return env.DOMAIN_MAP.get(subdomain).catch(() => null);
 }
 
-async function writeDomainCache(env: Env, subdomain: string, mapping: DomainMapping) {
+async function writeDomainCache(
+  env: Env,
+  subdomain: string,
+  mapping: DomainMapping,
+) {
   if (!env.DOMAIN_MAP) {
     return false;
   }
@@ -161,7 +205,7 @@ function decodePreview(path: string, bytes: Uint8Array) {
   }
 
   return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(
-    bytes.slice(0, platformConfig.deployment.maxPreviewHtmlBytes)
+    bytes.slice(0, platformConfig.deployment.maxPreviewHtmlBytes),
   );
 }
 
@@ -193,7 +237,7 @@ async function readDeployableArchive(archive: File) {
       path,
       size: content.byteLength,
       text: decodePreview(path, content),
-      content
+      content,
     });
   }
 
@@ -209,22 +253,26 @@ async function readDeployableFiles(files: Array<{ file: File; path: string }>) {
         path,
         size: content.byteLength,
         text: decodePreview(path, content),
-        content
+        content,
       };
-    })
+    }),
   );
 
   return prepareDeploymentFiles(deployableFiles, "free");
 }
 
-async function putDeploymentFiles(env: Env, r2Prefix: string, files: DeployableArchiveFile[]) {
+async function putDeploymentFiles(
+  env: Env,
+  r2Prefix: string,
+  files: DeployableArchiveFile[],
+) {
   const siteAssets = getSiteAssets(env);
 
   for (const file of files) {
     await siteAssets.put(`${r2Prefix}/${file.path}`, file.content, {
       httpMetadata: {
-        contentType: getContentType(file.path)
-      }
+        contentType: getContentType(file.path),
+      },
     });
   }
 }
@@ -248,17 +296,25 @@ function createWelcomeFile(env: Env, siteId: string) {
   return new File([html], "index.html", { type: "text/html;charset=utf-8" });
 }
 
-async function publishWelcomePage(env: Env, siteId: string, user?: AuthenticatedUser) {
+async function publishWelcomePage(
+  env: Env,
+  siteId: string,
+  user?: AuthenticatedUser,
+) {
   const file = createWelcomeFile(env, siteId);
   const prepared = await readDeployableFiles([{ file, path: "index.html" }]);
-  const session = await createUploadSession(env, { siteId, scan: prepared.scan, user });
+  const session = await createUploadSession(env, {
+    siteId,
+    scan: prepared.scan,
+    user,
+  });
 
   if (session.status === "blocked") throw new Error("默认页面未通过发布检查");
   return completeFilesUpload(env, {
     uploadSessionId: session.uploadSessionId,
     deploymentId: session.deploymentId,
     files: [{ file, path: "index.html" }],
-    user
+    user,
   });
 }
 
@@ -294,8 +350,11 @@ function assertAllowedAuthRedirect(env: Env, redirectTo: string) {
 
   const platform = getWorkerPlatformConfig(env);
   const appHost = platform.domains.appHost;
-  const localDev = (url.hostname === "127.0.0.1" || url.hostname === "localhost") && url.port === "5173";
-  const allowedHost = url.hostname === appHost || localDev || url.hostname.endsWith(".pages.dev");
+  const localDev =
+    (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
+    url.port === "5173";
+  const allowedHost =
+    url.hostname === appHost || localDev || url.hostname.endsWith(".pages.dev");
 
   if (!allowedHost || url.pathname !== "/auth") {
     throw new Error("验证跳转地址不被允许");
@@ -321,12 +380,15 @@ function getResendFrom(env: Env) {
   return `${name} <${email}>`;
 }
 
-function getSignupConfirmationHtml(input: { actionLink: string; expiresAt: string }) {
+function getSignupConfirmationHtml(input: {
+  actionLink: string;
+  expiresAt: string;
+}) {
   const expiresAt = new Date(input.expiresAt).toLocaleString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
     month: "2-digit",
-    day: "2-digit"
+    day: "2-digit",
   });
 
   return `<!doctype html>
@@ -362,7 +424,10 @@ function getSignupConfirmationHtml(input: { actionLink: string; expiresAt: strin
 </html>`;
 }
 
-function getSignupConfirmationText(input: { actionLink: string; expiresAt: string }) {
+function getSignupConfirmationText(input: {
+  actionLink: string;
+  expiresAt: string;
+}) {
   return [
     "确认你的 QingNest 轻巢邮箱",
     "",
@@ -370,13 +435,13 @@ function getSignupConfirmationText(input: { actionLink: string; expiresAt: strin
     input.actionLink,
     "",
     `链接有效期到 ${new Date(input.expiresAt).toLocaleString("zh-CN")}，且只能使用一次。`,
-    "如果不是你本人注册，可以忽略这封邮件。"
+    "如果不是你本人注册，可以忽略这封邮件。",
   ].join("\n");
 }
 
 async function sendSignupConfirmationEmail(
   env: Env,
-  input: { email: string; actionLink: string; expiresAt: string }
+  input: { email: string; actionLink: string; expiresAt: string },
 ) {
   if (!env.RESEND_API_KEY || env.RESEND_API_KEY.includes("replace-with")) {
     throw new Error("Resend API key 未配置");
@@ -386,22 +451,25 @@ async function sendSignupConfirmationEmail(
     method: "POST",
     headers: {
       authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "content-type": "application/json"
+      "content-type": "application/json",
     },
     body: JSON.stringify({
       from: getResendFrom(env),
       to: [input.email],
       subject: "确认你的 QingNest 轻巢邮箱",
       html: getSignupConfirmationHtml(input),
-      text: getSignupConfirmationText(input)
-    })
+      text: getSignupConfirmationText(input),
+    }),
   });
 
   if (!response.ok) {
     let message = "验证邮件发送失败";
 
     try {
-      const body = (await response.json()) as { message?: string; error?: string };
+      const body = (await response.json()) as {
+        message?: string;
+        error?: string;
+      };
       message = body.message ?? body.error ?? message;
     } catch {
       // Keep the generic error if Resend returns a non-JSON body.
@@ -413,7 +481,7 @@ async function sendSignupConfirmationEmail(
 
 async function clearSignupConfirmationSendLock(
   serviceSupabase: ReturnType<typeof createServiceSupabase>,
-  email: string
+  email: string,
 ) {
   const { error } = await serviceSupabase
     .from("auth_email_sends")
@@ -428,13 +496,15 @@ async function clearSignupConfirmationSendLock(
 
 async function rollbackGeneratedSignup(
   serviceSupabase: ReturnType<typeof createServiceSupabase>,
-  input: { email: string; userId?: string }
+  input: { email: string; userId?: string },
 ) {
   if (input.userId) {
     const { error } = await serviceSupabase.auth.admin.deleteUser(input.userId);
 
     if (error) {
-      throw new Error(`验证邮件发送失败，且无法清理未完成注册用户：${error.message}`);
+      throw new Error(
+        `验证邮件发送失败，且无法清理未完成注册用户：${error.message}`,
+      );
     }
   }
 
@@ -445,17 +515,25 @@ function isAuthUserEmailConfirmed(user: User) {
   return Boolean(user.email_confirmed_at ?? user.confirmed_at);
 }
 
-async function findAuthUserByEmail(serviceSupabase: ReturnType<typeof createServiceSupabase>, email: string) {
+async function findAuthUserByEmail(
+  serviceSupabase: ReturnType<typeof createServiceSupabase>,
+  email: string,
+) {
   const perPage = 1000;
 
   for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await serviceSupabase.auth.admin.listUsers({ page, perPage });
+    const { data, error } = await serviceSupabase.auth.admin.listUsers({
+      page,
+      perPage,
+    });
 
     if (error) {
       throw new Error(error.message);
     }
 
-    const user = data.users.find((candidate) => normalizeEmail(candidate.email ?? "") === email);
+    const user = data.users.find(
+      (candidate) => normalizeEmail(candidate.email ?? "") === email,
+    );
 
     if (user) return user;
     if (data.users.length < perPage) return null;
@@ -466,7 +544,7 @@ async function findAuthUserByEmail(serviceSupabase: ReturnType<typeof createServ
 
 async function updatePendingSignupPassword(
   serviceSupabase: ReturnType<typeof createServiceSupabase>,
-  input: { email: string; password: string }
+  input: { email: string; password: string },
 ) {
   const user = await findAuthUserByEmail(serviceSupabase, input.email);
 
@@ -481,7 +559,7 @@ async function updatePendingSignupPassword(
   }
 
   const { error } = await serviceSupabase.auth.admin.updateUserById(user.id, {
-    password: input.password
+    password: input.password,
   });
 
   if (error) {
@@ -491,7 +569,7 @@ async function updatePendingSignupPassword(
 
 export async function signUpWithEmailPassword(
   env: Env,
-  input: { email?: string; password?: string; redirectTo?: string }
+  input: { email?: string; password?: string; redirectTo?: string },
 ): Promise<SignUpConfirmationResult> {
   if (!hasAuthSupabase(env)) {
     throw new Error("Supabase Auth 未配置");
@@ -519,10 +597,13 @@ export async function signUpWithEmailPassword(
     throw new Error("邮箱已注册，可直接登录。");
   }
 
-  const { data: claims, error: claimError } = await serviceSupabase.rpc("claim_signup_confirmation_email", {
-    p_email: email,
-    p_ttl_seconds: SIGNUP_CONFIRMATION_TTL_SECONDS
-  });
+  const { data: claims, error: claimError } = await serviceSupabase.rpc(
+    "claim_signup_confirmation_email",
+    {
+      p_email: email,
+      p_ttl_seconds: SIGNUP_CONFIRMATION_TTL_SECONDS,
+    },
+  );
 
   if (claimError) {
     throw new Error(claimError.message);
@@ -537,44 +618,47 @@ export async function signUpWithEmailPassword(
   if (!claim.claimed) {
     await updatePendingSignupPassword(serviceSupabase, {
       email,
-      password: input.password
+      password: input.password,
     });
 
     return {
       email,
       alreadySent: true,
       sentAt: claim.sent_at,
-      expiresAt: claim.expires_at
+      expiresAt: claim.expires_at,
     };
   }
 
-  const { data: linkData, error: linkError } = await serviceSupabase.auth.admin.generateLink({
-    type: "signup",
-    email,
-    password: input.password,
-    options: {
-      redirectTo: input.redirectTo
-    }
-  });
+  const { data: linkData, error: linkError } =
+    await serviceSupabase.auth.admin.generateLink({
+      type: "signup",
+      email,
+      password: input.password,
+      options: {
+        redirectTo: input.redirectTo,
+      },
+    });
 
   const actionLink = linkData.properties?.action_link;
 
   if (linkError || !actionLink) {
     await clearSignupConfirmationSendLock(serviceSupabase, email);
 
-    throw new Error(getSignUpErrorMessage(linkError?.message ?? "无法生成邮箱验证链接"));
+    throw new Error(
+      getSignUpErrorMessage(linkError?.message ?? "无法生成邮箱验证链接"),
+    );
   }
 
   try {
     await sendSignupConfirmationEmail(env, {
       email,
       actionLink,
-      expiresAt: claim.expires_at
+      expiresAt: claim.expires_at,
     });
   } catch (sendError) {
     await rollbackGeneratedSignup(serviceSupabase, {
       email,
-      userId: linkData.user?.id
+      userId: linkData.user?.id,
     });
 
     throw sendError;
@@ -584,20 +668,22 @@ export async function signUpWithEmailPassword(
     email,
     alreadySent: false,
     sentAt: claim.sent_at,
-    expiresAt: claim.expires_at
+    expiresAt: claim.expires_at,
   };
 }
 
 function assertEmailConfirmed(user: AuthenticatedUser) {
   if (!user.emailConfirmed) {
-    throw new Error("请先验证邮箱后再创建站点。注册验证邮件有效期为 24 小时，创建时不会重复发送。");
+    throw new Error(
+      "请先验证邮箱后再创建站点。注册验证邮件有效期为 24 小时，创建时不会重复发送。",
+    );
   }
 }
 
 export async function getAuthenticatedUser(
   request: Request,
   env: Env,
-  options: { requireEmailConfirmed?: boolean } = {}
+  options: { requireEmailConfirmed?: boolean } = {},
 ): Promise<AuthenticatedUser> {
   const token = getBearerToken(request);
 
@@ -616,7 +702,9 @@ export async function getAuthenticatedUser(
     throw new Error("登录状态无效或已过期");
   }
 
-  const emailConfirmed = Boolean(data.user.email_confirmed_at ?? data.user.confirmed_at);
+  const emailConfirmed = Boolean(
+    data.user.email_confirmed_at ?? data.user.confirmed_at,
+  );
 
   if ((options.requireEmailConfirmed ?? true) && !emailConfirmed) {
     throw new Error("请先验证邮箱后再继续操作。注册验证邮件有效期为 24 小时。");
@@ -625,7 +713,7 @@ export async function getAuthenticatedUser(
   return {
     id: data.user.id,
     email: data.user.email ?? "",
-    emailConfirmed
+    emailConfirmed,
   };
 }
 
@@ -645,32 +733,67 @@ async function findDomainByHostname(env: Env, hostname: string) {
   return data;
 }
 
-export async function checkSubdomainAvailability(env: Env, subdomain: string) {
+type SubdomainAvailability = {
+  available: boolean;
+  normalized: string;
+  requiresReview?: boolean;
+  publicUrl?: string;
+  reason?: string;
+  hostname?: string;
+};
+
+function invalidateSubdomainAvailability(subdomain: string) {
+  for (const key of subdomainAvailabilityCache.keys()) {
+    if (key.startsWith(`${subdomain.trim().toLowerCase()}.`))
+      subdomainAvailabilityCache.delete(key);
+  }
+}
+
+export async function checkSubdomainAvailability(
+  env: Env,
+  subdomain: string,
+): Promise<SubdomainAvailability> {
   const validation = validateSubdomain(subdomain);
 
   if (!validation.ok) {
     return {
       available: false,
       normalized: validation.normalized,
-      reason: validation.reason
+      reason: validation.reason,
     };
   }
 
   const hostname = getDistributionHostname(env, validation.normalized);
-  const existing = hasServiceSupabase(env)
-    ? await findDomainByHostname(env, hostname)
-    : claimedSubdomains.has(validation.normalized)
-      ? "claimed"
-      : await readDomainCache(env, validation.normalized);
+  const cached = subdomainAvailabilityCache.get(hostname);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
 
-  return {
-    available: !existing,
-    normalized: validation.normalized,
-    requiresReview: validation.requiresReview,
-    publicUrl: getSiteUrl(env, validation.normalized),
-    reason: existing ? "这个子域名已被占用" : undefined,
-    hostname
-  };
+  if (subdomainAvailabilityCache.size >= 500) {
+    const oldestKey = subdomainAvailabilityCache.keys().next().value;
+    if (oldestKey) subdomainAvailabilityCache.delete(oldestKey);
+  }
+
+  const pending = (async (): Promise<SubdomainAvailability> => {
+    const existing = hasServiceSupabase(env)
+      ? await findDomainByHostname(env, hostname)
+      : claimedSubdomains.has(validation.normalized)
+        ? "claimed"
+        : await readDomainCache(env, validation.normalized);
+
+    return {
+      available: !existing,
+      normalized: validation.normalized,
+      requiresReview: validation.requiresReview,
+      publicUrl: getSiteUrl(env, validation.normalized),
+      reason: existing ? "这个子域名已被占用" : undefined,
+      hostname,
+    };
+  })();
+  subdomainAvailabilityCache.set(hostname, {
+    expiresAt: Date.now() + SUBDOMAIN_AVAILABILITY_CACHE_MS,
+    request: pending,
+  });
+  pending.catch(() => subdomainAvailabilityCache.delete(hostname));
+  return pending;
 }
 
 async function ensureProfile(env: Env, user: AuthenticatedUser) {
@@ -684,7 +807,10 @@ async function ensureProfile(env: Env, user: AuthenticatedUser) {
   }
 }
 
-export async function getAccountProfile(env: Env, user: AuthenticatedUser): Promise<AccountProfile> {
+export async function getAccountProfile(
+  env: Env,
+  user: AuthenticatedUser,
+): Promise<AccountProfile> {
   await ensureProfile(env, user);
 
   const supabase = createServiceSupabase(env);
@@ -707,15 +833,32 @@ export async function getAccountProfile(env: Env, user: AuthenticatedUser): Prom
   if (sitesError) throw new Error(sitesError.message);
 
   const siteIds = (sites ?? []).map((site) => site.id);
-  const activeDeploymentIds = (sites ?? []).map((site) => site.active_deployment_id).filter((id): id is string => Boolean(id));
-  const [{ data: activeDeployments, error: storageError }, { count: deploymentsToday, error: deploymentsError }, { count: publicSites, error: publicSitesError }] = await Promise.all([
+  const activeDeploymentIds = (sites ?? [])
+    .map((site) => site.active_deployment_id)
+    .filter((id): id is string => Boolean(id));
+  const [
+    { data: activeDeployments, error: storageError },
+    { count: deploymentsToday, error: deploymentsError },
+    { count: publicSites, error: publicSitesError },
+  ] = await Promise.all([
     activeDeploymentIds.length > 0
-      ? supabase.from("deployments").select("total_bytes").in("id", activeDeploymentIds)
+      ? supabase
+          .from("deployments")
+          .select("total_bytes")
+          .in("id", activeDeploymentIds)
       : Promise.resolve({ data: [], error: null }),
     siteIds.length > 0
-      ? supabase.from("deployments").select("id", { count: "exact", head: true }).in("site_id", siteIds).gte("created_at", dayAgo)
+      ? supabase
+          .from("deployments")
+          .select("id", { count: "exact", head: true })
+          .in("site_id", siteIds)
+          .gte("created_at", dayAgo)
       : Promise.resolve({ count: 0, error: null }),
-    supabase.from("domains").select("id", { count: "exact", head: true }).eq("user_id", user.id).neq("status", "deleted")
+    supabase
+      .from("domains")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .neq("status", "deleted"),
   ]);
   const usageError = storageError ?? deploymentsError ?? publicSitesError;
   if (usageError) throw new Error(usageError.message);
@@ -730,13 +873,19 @@ export async function getAccountProfile(env: Env, user: AuthenticatedUser): Prom
     usage: {
       sites: sites?.length ?? 0,
       publicSites: publicSites ?? 0,
-      storageBytes: (activeDeployments ?? []).reduce((total, deployment) => total + Number(deployment.total_bytes ?? 0), 0),
-      deploymentsToday: deploymentsToday ?? 0
-    }
+      storageBytes: (activeDeployments ?? []).reduce(
+        (total, deployment) => total + Number(deployment.total_bytes ?? 0),
+        0,
+      ),
+      deploymentsToday: deploymentsToday ?? 0,
+    },
   };
 }
 
-export async function getAdminOverview(env: Env, user: AuthenticatedUser): Promise<AdminOverview> {
+export async function getAdminOverview(
+  env: Env,
+  user: AuthenticatedUser,
+): Promise<AdminOverview> {
   const account = await getAccountProfile(env, user);
 
   if (account.role !== "admin") {
@@ -749,16 +898,30 @@ export async function getAdminOverview(env: Env, user: AuthenticatedUser): Promi
     { count: sites, error: sitesError },
     { count: activeSites, error: activeSitesError },
     { count: pendingReviewSites, error: pendingReviewSitesError },
-    { count: deployments, error: deploymentsError }
+    { count: deployments, error: deploymentsError },
   ] = await Promise.all([
     supabase.from("profiles").select("id", { count: "exact", head: true }),
-    supabase.from("sites").select("id", { count: "exact", head: true }).neq("status", "deleted"),
-    supabase.from("sites").select("id", { count: "exact", head: true }).eq("status", "active"),
-    supabase.from("sites").select("id", { count: "exact", head: true }).eq("status", "pending_review"),
-    supabase.from("deployments").select("id", { count: "exact", head: true })
+    supabase
+      .from("sites")
+      .select("id", { count: "exact", head: true })
+      .neq("status", "deleted"),
+    supabase
+      .from("sites")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "active"),
+    supabase
+      .from("sites")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending_review"),
+    supabase.from("deployments").select("id", { count: "exact", head: true }),
   ]);
 
-  const error = usersError ?? sitesError ?? activeSitesError ?? pendingReviewSitesError ?? deploymentsError;
+  const error =
+    usersError ??
+    sitesError ??
+    activeSitesError ??
+    pendingReviewSitesError ??
+    deploymentsError;
 
   if (error) {
     throw new Error(error.message);
@@ -769,13 +932,17 @@ export async function getAdminOverview(env: Env, user: AuthenticatedUser): Promi
     sites: sites ?? 0,
     activeSites: activeSites ?? 0,
     pendingReviewSites: pendingReviewSites ?? 0,
-    deployments: deployments ?? 0
+    deployments: deployments ?? 0,
   };
 }
 
 async function getUserPlan(env: Env, user: AuthenticatedUser) {
   const supabase = createServiceSupabase(env);
-  const { data, error } = await supabase.from("profiles").select("plan").eq("id", user.id).maybeSingle();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", user.id)
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message);
@@ -809,19 +976,24 @@ async function assertUploadSessionQuota(env: Env, user: AuthenticatedUser) {
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const siteIds = await listUserSiteIds(env, user);
 
-  const [{ count: sessionsThisHour, error: sessionsError }, { count: deploymentsToday, error: deploymentsError }] =
-    await Promise.all([
-      supabase
-        .from("upload_sessions")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .gte("created_at", hourAgo),
-      supabase
-        .from("deployments")
-        .select("id", { count: "exact", head: true })
-        .in("site_id", siteIds.length > 0 ? siteIds : ["00000000-0000-0000-0000-000000000000"])
-        .gte("created_at", dayAgo)
-    ]);
+  const [
+    { count: sessionsThisHour, error: sessionsError },
+    { count: deploymentsToday, error: deploymentsError },
+  ] = await Promise.all([
+    supabase
+      .from("upload_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", hourAgo),
+    supabase
+      .from("deployments")
+      .select("id", { count: "exact", head: true })
+      .in(
+        "site_id",
+        siteIds.length > 0 ? siteIds : ["00000000-0000-0000-0000-000000000000"],
+      )
+      .gte("created_at", dayAgo),
+  ]);
 
   if (sessionsError) {
     throw new Error(sessionsError.message);
@@ -832,11 +1004,15 @@ async function assertUploadSessionQuota(env: Env, user: AuthenticatedUser) {
   }
 
   if ((sessionsThisHour ?? 0) >= plan.quotas.user.maxUploadSessionsPerHour) {
-    throw new Error(`免费套餐每小时最多创建 ${plan.quotas.user.maxUploadSessionsPerHour} 个上传会话`);
+    throw new Error(
+      `免费套餐每小时最多创建 ${plan.quotas.user.maxUploadSessionsPerHour} 个上传会话`,
+    );
   }
 
   if ((deploymentsToday ?? 0) >= plan.quotas.user.maxDeploymentsPerDay) {
-    throw new Error(`免费套餐每天最多创建 ${plan.quotas.user.maxDeploymentsPerDay} 次部署`);
+    throw new Error(
+      `免费套餐每天最多创建 ${plan.quotas.user.maxDeploymentsPerDay} 次部署`,
+    );
   }
 }
 
@@ -855,47 +1031,78 @@ async function listUserSiteIds(env: Env, user: AuthenticatedUser) {
   return (data ?? []).map((site) => site.id);
 }
 
-async function assertStorageQuota(env: Env, user: AuthenticatedUser, siteId: string, nextDeploymentBytes: number) {
+async function assertStorageQuota(
+  env: Env,
+  user: AuthenticatedUser,
+  siteId: string,
+  nextDeploymentBytes: number,
+) {
   const supabase = createServiceSupabase(env);
   const plan = getPlanConfig(await getUserPlan(env, user));
   const siteIds = await listUserSiteIds(env, user);
-  const [{ data, error }, { data: replacingSite, error: siteError }] = await Promise.all([
-    supabase
-      .from("deployments")
-      .select("id, total_bytes")
-      .in("site_id", siteIds.length > 0 ? siteIds : ["00000000-0000-0000-0000-000000000000"])
-      .neq("status", "blocked")
-      .neq("status", "failed")
-      .neq("status", "superseded"),
-    supabase.from("sites").select("active_deployment_id").eq("id", siteId).eq("user_id", user.id).neq("status", "deleted").maybeSingle()
-  ]);
+  const [{ data, error }, { data: replacingSite, error: siteError }] =
+    await Promise.all([
+      supabase
+        .from("deployments")
+        .select("id, total_bytes")
+        .in(
+          "site_id",
+          siteIds.length > 0
+            ? siteIds
+            : ["00000000-0000-0000-0000-000000000000"],
+        )
+        .neq("status", "blocked")
+        .neq("status", "failed")
+        .neq("status", "superseded"),
+      supabase
+        .from("sites")
+        .select("active_deployment_id")
+        .eq("id", siteId)
+        .eq("user_id", user.id)
+        .neq("status", "deleted")
+        .maybeSingle(),
+    ]);
 
   if (error) {
     throw new Error(error.message);
   }
-  if (siteError || !replacingSite) throw new Error(siteError?.message ?? "项目不存在或无权访问");
+  if (siteError || !replacingSite)
+    throw new Error(siteError?.message ?? "项目不存在或无权访问");
 
   const usedBytes = (data ?? []).reduce(
-    (total, deployment) => deployment.id === replacingSite.active_deployment_id ? total : total + Number(deployment.total_bytes ?? 0),
-    0
+    (total, deployment) =>
+      deployment.id === replacingSite.active_deployment_id
+        ? total
+        : total + Number(deployment.total_bytes ?? 0),
+    0,
   );
 
   if (usedBytes + nextDeploymentBytes > plan.quotas.user.maxStorageBytes) {
-    throw new Error(`免费套餐总存储最多 ${Math.round(plan.quotas.user.maxStorageBytes / 1024 / 1024)} MB`);
+    throw new Error(
+      `免费套餐总存储最多 ${Math.round(plan.quotas.user.maxStorageBytes / 1024 / 1024)} MB`,
+    );
   }
 }
 
 function projectStatus(status: string): DraftSite["status"] {
-  if (status === "active" || status === "pending_review" || status === "blocked") return status;
+  if (
+    status === "active" ||
+    status === "pending_review" ||
+    status === "blocked"
+  )
+    return status;
   return "draft";
 }
 
-export async function listProjects(env: Env, user?: AuthenticatedUser): Promise<ProjectSummary[]> {
+export async function listProjects(
+  env: Env,
+  user?: AuthenticatedUser,
+): Promise<ProjectSummary[]> {
   if (!hasServiceSupabase(env)) {
     return Array.from(draftSites.values()).map((site) => ({
       ...site,
       createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString()
+      updatedAt: new Date(0).toISOString(),
     }));
   }
 
@@ -911,10 +1118,17 @@ export async function listProjects(env: Env, user?: AuthenticatedUser): Promise<
   if (error) throw new Error(error.message);
   const siteIds = (sites ?? []).map((site) => site.id);
   const { data: domains, error: domainError } = siteIds.length
-    ? await supabase.from("domains").select("site_id, hostname").in("site_id", siteIds).eq("type", "platform_subdomain").neq("status", "deleted")
+    ? await supabase
+        .from("domains")
+        .select("site_id, hostname")
+        .in("site_id", siteIds)
+        .eq("type", "platform_subdomain")
+        .neq("status", "deleted")
     : { data: [], error: null };
   if (domainError) throw new Error(domainError.message);
-  const hostnames = new Map((domains ?? []).map((domain) => [domain.site_id, domain.hostname]));
+  const hostnames = new Map(
+    (domains ?? []).map((domain) => [domain.site_id, domain.hostname]),
+  );
 
   return (sites ?? []).map((site) => {
     const hostname = hostnames.get(site.id) ?? "";
@@ -926,20 +1140,28 @@ export async function listProjects(env: Env, user?: AuthenticatedUser): Promise<
       publicUrl: hostname ? getPublicUrlFromHostname(env, hostname) : "",
       visibility: hostname ? "public" : "private",
       createdAt: site.created_at,
-      updatedAt: site.updated_at
+      updatedAt: site.updated_at,
     };
   });
 }
 
-export async function getProject(env: Env, siteId: string, user?: AuthenticatedUser): Promise<ProjectDetail> {
-  const project = (await listProjects(env, user)).find((site) => site.id === siteId);
+export async function getProject(
+  env: Env,
+  siteId: string,
+  user?: AuthenticatedUser,
+): Promise<ProjectDetail> {
+  const project = (await listProjects(env, user)).find(
+    (site) => site.id === siteId,
+  );
   if (!project) throw new Error("项目不存在或无权访问");
   if (!hasServiceSupabase(env)) return { ...project, deployments: [] };
 
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
     .from("deployments")
-    .select("id, version, status, file_count, total_bytes, created_at, activated_at")
+    .select(
+      "id, version, status, file_count, total_bytes, created_at, activated_at",
+    )
     .eq("site_id", siteId)
     .order("version", { ascending: false });
   if (error) throw new Error(error.message);
@@ -953,12 +1175,17 @@ export async function getProject(env: Env, siteId: string, user?: AuthenticatedU
       fileCount: deployment.file_count,
       totalBytes: deployment.total_bytes,
       createdAt: deployment.created_at,
-      activatedAt: deployment.activated_at
-    }))
+      activatedAt: deployment.activated_at,
+    })),
   };
 }
 
-export async function updateProjectName(env: Env, siteId: string, name: string, user?: AuthenticatedUser) {
+export async function updateProjectName(
+  env: Env,
+  siteId: string,
+  name: string,
+  user?: AuthenticatedUser,
+) {
   const normalizedName = name.trim();
   if (!normalizedName) throw new Error("项目名称不能为空");
   if (normalizedName.length > 80) throw new Error("项目名称不能超过 80 个字符");
@@ -982,9 +1209,56 @@ export async function updateProjectName(env: Env, siteId: string, name: string, 
   return getProject(env, siteId, user);
 }
 
+export async function deleteProject(
+  env: Env,
+  siteId: string,
+  user?: AuthenticatedUser,
+) {
+  if (!hasServiceSupabase(env)) {
+    if (!draftSites.delete(siteId)) throw new Error("项目不存在或无权访问");
+    return { id: siteId };
+  }
+  if (!user) throw new Error("请先登录后再删除项目");
+  const supabase = createServiceSupabase(env);
+  const { data: site, error: siteError } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("id", siteId)
+    .eq("user_id", user.id)
+    .neq("status", "deleted")
+    .maybeSingle();
+  if (siteError) throw new Error(siteError.message);
+  if (!site) throw new Error("项目不存在或无权访问");
+  const { data: domains, error: domainReadError } = await supabase
+    .from("domains")
+    .select("hostname")
+    .eq("site_id", siteId)
+    .eq("user_id", user.id)
+    .neq("status", "deleted");
+  if (domainReadError) throw new Error(domainReadError.message);
+  const { error: domainError } = await supabase
+    .from("domains")
+    .update({ site_id: null, last_binding_change_at: new Date().toISOString() })
+    .eq("site_id", siteId)
+    .eq("user_id", user.id);
+  if (domainError) throw new Error(domainError.message);
+  await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname)));
+  const { error } = await supabase
+    .from("sites")
+    .update({
+      status: "deleted",
+      active_deployment_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", siteId)
+    .eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  return { id: siteId };
+}
+
 export async function createDraftSite(
   env: Env,
-  input: { name: string; user?: AuthenticatedUser }
+  input: { name: string; user?: AuthenticatedUser },
 ) {
   if (hasServiceSupabase(env)) {
     if (!input.user) {
@@ -1001,7 +1275,7 @@ export async function createDraftSite(
       .insert({
         user_id: input.user.id,
         name: input.name,
-        status: "draft"
+        status: "draft",
       })
       .select("id, name, status")
       .single();
@@ -1016,7 +1290,7 @@ export async function createDraftSite(
       subdomain: "",
       publicUrl: "",
       status: "draft",
-      visibility: "private"
+      visibility: "private",
     };
   }
 
@@ -1026,14 +1300,17 @@ export async function createDraftSite(
     subdomain: "",
     publicUrl: "",
     status: "draft",
-    visibility: "private"
+    visibility: "private",
   };
 
   draftSites.set(site.id, site);
   return site;
 }
 
-export async function listPublicSlots(env: Env, user: AuthenticatedUser): Promise<PublicSlot[]> {
+export async function listPublicSlots(
+  env: Env,
+  user: AuthenticatedUser,
+): Promise<PublicSlot[]> {
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
     .from("domains")
@@ -1048,11 +1325,20 @@ export async function listPublicSlots(env: Env, user: AuthenticatedUser): Promis
     hostname: domain.hostname,
     publicUrl: getPublicUrlFromHostname(env, domain.hostname),
     type: domain.type,
-    status: domain.status === "blocked" ? "blocked" : domain.status === "pending_review" ? "pending_review" : "active"
+    status:
+      domain.status === "blocked"
+        ? "blocked"
+        : domain.status === "pending_review"
+          ? "pending_review"
+          : "active",
   }));
 }
 
-async function getOwnedPublishableSite(env: Env, user: AuthenticatedUser, siteId: string) {
+async function getOwnedPublishableSite(
+  env: Env,
+  user: AuthenticatedUser,
+  siteId: string,
+) {
   const supabase = createServiceSupabase(env);
   const { data: site, error } = await supabase
     .from("sites")
@@ -1062,18 +1348,25 @@ async function getOwnedPublishableSite(env: Env, user: AuthenticatedUser, siteId
     .neq("status", "deleted")
     .single();
   if (error || !site) throw new Error("项目不存在或无权访问");
-  if (!site.active_deployment_id) throw new Error("请先为项目发布一个版本，再将它设为公开");
+  if (!site.active_deployment_id)
+    throw new Error("请先为项目发布一个版本，再将它设为公开");
   const { data: deployment, error: deploymentError } = await supabase
     .from("deployments")
     .select("id, r2_prefix, spa_fallback_enabled, status")
     .eq("id", site.active_deployment_id)
     .eq("site_id", site.id)
     .single();
-  if (deploymentError || !deployment || deployment.status !== "active") throw new Error("项目当前没有可公开的有效版本");
+  if (deploymentError || !deployment || deployment.status !== "active")
+    throw new Error("项目当前没有可公开的有效版本");
   return { site, deployment };
 }
 
-async function cachePublicSlot(env: Env, domain: { hostname: string; status: string }, siteId: string, deployment: { id: string; r2_prefix: string; spa_fallback_enabled: boolean }) {
+async function cachePublicSlot(
+  env: Env,
+  domain: { hostname: string; status: string },
+  siteId: string,
+  deployment: { id: string; r2_prefix: string; spa_fallback_enabled: boolean },
+) {
   const subdomain = domain.hostname.split(".")[0] ?? domain.hostname;
   await writeDomainCache(env, subdomain, {
     hostname: domain.hostname,
@@ -1081,73 +1374,197 @@ async function cachePublicSlot(env: Env, domain: { hostname: string; status: str
     deploymentId: deployment.id,
     r2Prefix: deployment.r2_prefix,
     spaFallbackEnabled: deployment.spa_fallback_enabled,
-    status: domain.status === "pending_review" ? "pending_review" : "active"
+    status: domain.status === "pending_review" ? "pending_review" : "active",
   });
 }
 
-export async function createPublicSlot(env: Env, input: { siteId: string; subdomain: string; user: AuthenticatedUser }) {
+export async function createPublicSlot(
+  env: Env,
+  input: { siteId: string; subdomain: string; user: AuthenticatedUser },
+) {
   const availability = await checkSubdomainAvailability(env, input.subdomain);
-  if (!availability.available) throw new Error(availability.reason ?? "公开地址不可用");
+  if (!availability.available)
+    throw new Error(availability.reason ?? "公开地址不可用");
   const plan = getPlanConfig(await getUserPlan(env, input.user));
   const supabase = createServiceSupabase(env);
-  const { count, error: countError } = await supabase.from("domains").select("id", { count: "exact", head: true }).eq("user_id", input.user.id).neq("status", "deleted");
+  const { count, error: countError } = await supabase
+    .from("domains")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", input.user.id)
+    .neq("status", "deleted");
   if (countError) throw new Error(countError.message);
-  if ((count ?? 0) >= plan.quotas.user.maxPublicSites) throw new Error(`当前套餐最多同时公开 ${plan.quotas.user.maxPublicSites} 个项目`);
-  const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
-  const { data: domain, error } = await supabase.from("domains").insert({
-    user_id: input.user.id,
-    site_id: input.siteId,
-    hostname: availability.hostname ?? getDistributionHostname(env, availability.normalized),
-    type: "platform_subdomain",
-    status: availability.requiresReview ? "pending_review" : "active",
-    last_binding_change_at: new Date().toISOString()
-  }).select("id, site_id, hostname, type, status").single();
+  if ((count ?? 0) >= plan.quotas.user.maxPublicSites)
+    throw new Error(
+      `当前套餐最多同时公开 ${plan.quotas.user.maxPublicSites} 个项目`,
+    );
+  const { deployment } = await getOwnedPublishableSite(
+    env,
+    input.user,
+    input.siteId,
+  );
+  const { data: domain, error } = await supabase
+    .from("domains")
+    .insert({
+      user_id: input.user.id,
+      site_id: input.siteId,
+      hostname:
+        availability.hostname ??
+        getDistributionHostname(env, availability.normalized),
+      type: "platform_subdomain",
+      status: availability.requiresReview ? "pending_review" : "active",
+      last_binding_change_at: new Date().toISOString(),
+    })
+    .select("id, site_id, hostname, type, status")
+    .single();
   if (error || !domain) throw new Error(error?.message ?? "公开地址创建失败");
+  invalidateSubdomainAvailability(availability.normalized);
   await cachePublicSlot(env, domain, input.siteId, deployment);
-  return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
+  return (await listPublicSlots(env, input.user)).find(
+    (slot) => slot.id === domain.id,
+  )!;
 }
 
-export async function switchPublicSlot(env: Env, input: { slotId: string; siteId: string | null; user: AuthenticatedUser }) {
+export async function rentPublicSlot(
+  env: Env,
+  input: { subdomain: string; user: AuthenticatedUser },
+) {
+  const availability = await checkSubdomainAvailability(env, input.subdomain);
+  if (!availability.available)
+    throw new Error(availability.reason ?? "公开地址不可用");
+
   const supabase = createServiceSupabase(env);
-  const { data: domain, error: domainError } = await supabase.from("domains").select("id, hostname, status, site_id, last_binding_change_at").eq("id", input.slotId).eq("user_id", input.user.id).neq("status", "deleted").single();
+  const { count, error: countError } = await supabase
+    .from("domains")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", input.user.id)
+    .neq("status", "deleted");
+  if (countError) throw new Error(countError.message);
+  if ((count ?? 0) >= 10)
+    throw new Error("每个账户最多可保留 10 个平台地址");
+
+  const { data: domain, error } = await supabase
+    .from("domains")
+    .insert({
+      user_id: input.user.id,
+      site_id: null,
+      hostname:
+        availability.hostname ??
+        getDistributionHostname(env, availability.normalized),
+      type: "platform_subdomain",
+      status: availability.requiresReview ? "pending_review" : "active",
+    })
+    .select("id, site_id, hostname, type, status")
+    .single();
+  if (error?.code === "23505") throw new Error("这个子域名已被占用");
+  if (error || !domain) throw new Error(error?.message ?? "平台地址租赁失败");
+  invalidateSubdomainAvailability(availability.normalized);
+
+  return (await listPublicSlots(env, input.user)).find(
+    (slot) => slot.id === domain.id,
+  )!;
+}
+
+export async function switchPublicSlot(
+  env: Env,
+  input: { slotId: string; siteId: string | null; user: AuthenticatedUser },
+) {
+  const supabase = createServiceSupabase(env);
+  const { data: domain, error: domainError } = await supabase
+    .from("domains")
+    .select("id, hostname, status, site_id, last_binding_change_at")
+    .eq("id", input.slotId)
+    .eq("user_id", input.user.id)
+    .neq("status", "deleted")
+    .single();
   if (domainError || !domain) throw new Error("公开地址不存在或无权操作");
-  if (domain.site_id === input.siteId) return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
+  if (domain.site_id === input.siteId)
+    return (await listPublicSlots(env, input.user)).find(
+      (slot) => slot.id === domain.id,
+    )!;
   const cooldownMs = 10 * 60 * 1000;
-  const lastChange = domain.last_binding_change_at ? Date.parse(domain.last_binding_change_at) : 0;
+  const lastChange = domain.last_binding_change_at
+    ? Date.parse(domain.last_binding_change_at)
+    : 0;
   if (lastChange && Date.now() - lastChange < cooldownMs) {
-    const remainingMinutes = Math.max(1, Math.ceil((cooldownMs - (Date.now() - lastChange)) / 60_000));
-    throw new Error(`该平台地址刚刚发生过绑定变更，请 ${remainingMinutes} 分钟后再试`);
+    const remainingMinutes = Math.max(
+      1,
+      Math.ceil((cooldownMs - (Date.now() - lastChange)) / 60_000),
+    );
+    throw new Error(
+      `该平台地址刚刚发生过绑定变更，请 ${remainingMinutes} 分钟后再试`,
+    );
   }
   if (!input.siteId) {
-    const { error } = await supabase.from("domains").update({ site_id: null, last_binding_change_at: new Date().toISOString() }).eq("id", domain.id).eq("user_id", input.user.id);
+    const { error } = await supabase
+      .from("domains")
+      .update({
+        site_id: null,
+        last_binding_change_at: new Date().toISOString(),
+      })
+      .eq("id", domain.id)
+      .eq("user_id", input.user.id);
     if (error) throw new Error(error.message);
-    await deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname);
+    await deleteDomainCache(
+      env,
+      domain.hostname.split(".")[0] ?? domain.hostname,
+    );
   } else {
-    const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
-    const { error } = await supabase.from("domains").update({ site_id: input.siteId, last_binding_change_at: new Date().toISOString() }).eq("id", domain.id).eq("user_id", input.user.id);
+    const { deployment } = await getOwnedPublishableSite(
+      env,
+      input.user,
+      input.siteId,
+    );
+    const { error } = await supabase
+      .from("domains")
+      .update({
+        site_id: input.siteId,
+        last_binding_change_at: new Date().toISOString(),
+      })
+      .eq("id", domain.id)
+      .eq("user_id", input.user.id);
     if (error) throw new Error(error.message);
     await cachePublicSlot(env, domain, input.siteId, deployment);
   }
-  return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
+  return (await listPublicSlots(env, input.user)).find(
+    (slot) => slot.id === domain.id,
+  )!;
 }
 
-export async function createPrivatePreview(env: Env, input: { siteId: string; user: AuthenticatedUser; origin: string }) {
+export async function createPrivatePreview(
+  env: Env,
+  input: { siteId: string; user: AuthenticatedUser; origin: string },
+) {
   if (!env.DOMAIN_MAP) throw new Error("私人预览服务尚未配置");
-  const { deployment } = await getOwnedPublishableSite(env, input.user, input.siteId);
+  const { deployment } = await getOwnedPublishableSite(
+    env,
+    input.user,
+    input.siteId,
+  );
   const token = nanoid(32);
-  await env.DOMAIN_MAP.put(`preview:${token}`, JSON.stringify({
-    siteId: input.siteId,
-    deploymentId: deployment.id,
-    r2Prefix: deployment.r2_prefix,
-    spaFallbackEnabled: deployment.spa_fallback_enabled,
-    status: "active"
-  }), { expirationTtl: 600 });
-  return { url: `${input.origin}/preview/${token}/`, expiresAt: new Date(Date.now() + 600_000).toISOString() };
+  await env.DOMAIN_MAP.put(
+    `preview:${token}`,
+    JSON.stringify({
+      siteId: input.siteId,
+      deploymentId: deployment.id,
+      r2Prefix: deployment.r2_prefix,
+      spaFallbackEnabled: deployment.spa_fallback_enabled,
+      status: "active",
+    }),
+    { expirationTtl: 600 },
+  );
+  return {
+    url: `${input.origin}/preview/${token}/`,
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+  };
 }
 
 export async function createUploadSession(
   env: Env,
-  input: { siteId: string; scan: DeploymentScanResult; user?: AuthenticatedUser }
+  input: {
+    siteId: string;
+    scan: DeploymentScanResult;
+    user?: AuthenticatedUser;
+  },
 ) {
   if (hasServiceSupabase(env)) {
     if (!input.user) {
@@ -1157,19 +1574,27 @@ export async function createUploadSession(
     assertEmailConfirmed(input.user);
     await ensureProfile(env, input.user);
     await assertUploadSessionQuota(env, input.user);
-    await assertStorageQuota(env, input.user, input.siteId, input.scan.totalBytes);
+    await assertStorageQuota(
+      env,
+      input.user,
+      input.siteId,
+      input.scan.totalBytes,
+    );
 
     return createPersistentUploadSession(env, {
       siteId: input.siteId,
       scan: input.scan,
-      user: input.user
+      user: input.user,
     });
   }
 
   return createMemoryUploadSession(env, input);
 }
 
-async function createMemoryUploadSession(env: Env, input: { siteId: string; scan: DeploymentScanResult }) {
+async function createMemoryUploadSession(
+  env: Env,
+  input: { siteId: string; scan: DeploymentScanResult },
+) {
   const site = draftSites.get(input.siteId);
 
   if (!site) {
@@ -1180,13 +1605,16 @@ async function createMemoryUploadSession(env: Env, input: { siteId: string; scan
     return {
       uploadSessionId: nanoid(),
       deploymentId: nanoid(),
-      status: "blocked" as const
+      status: "blocked" as const,
     };
   }
 
   const deploymentId = nanoid();
   const uploadSessionId = nanoid();
-  const status = input.scan.riskLevel !== "low" || site.status === "pending_review" ? "pending_review" : "uploading";
+  const status =
+    input.scan.riskLevel !== "low" || site.status === "pending_review"
+      ? "pending_review"
+      : "uploading";
   memoryUploadSessions.set(uploadSessionId, {
     siteId: site.id,
     deploymentId,
@@ -1194,19 +1622,27 @@ async function createMemoryUploadSession(env: Env, input: { siteId: string; scan
     r2Prefix: `sites/${site.id}/deployments/${deploymentId}`,
     status,
     spaFallbackEnabled: input.scan.spaFallbackRecommended,
-    expiresAt: Date.now() + getPlanConfig("free").quotas.deployment.uploadSessionTtlMinutes * 60 * 1000
+    expiresAt:
+      Date.now() +
+      getPlanConfig("free").quotas.deployment.uploadSessionTtlMinutes *
+        60 *
+        1000,
   });
 
   return {
     uploadSessionId,
     deploymentId,
-    status
+    status,
   };
 }
 
 async function createPersistentUploadSession(
   env: Env,
-  input: { siteId: string; scan: DeploymentScanResult; user: AuthenticatedUser }
+  input: {
+    siteId: string;
+    scan: DeploymentScanResult;
+    user: AuthenticatedUser;
+  },
 ) {
   const supabase = createServiceSupabase(env);
   const { data: site, error: siteError } = await supabase
@@ -1221,13 +1657,14 @@ async function createPersistentUploadSession(
     throw new Error("站点不存在或无权访问");
   }
 
-  const hasBlockingIssues = input.scan.issues.some((issue) => issue.severity === "error");
-  const deploymentStatus =
-    hasBlockingIssues
-      ? "blocked"
-      : input.scan.riskLevel !== "low" || site.status === "pending_review"
-        ? "pending_review"
-        : "uploading";
+  const hasBlockingIssues = input.scan.issues.some(
+    (issue) => issue.severity === "error",
+  );
+  const deploymentStatus = hasBlockingIssues
+    ? "blocked"
+    : input.scan.riskLevel !== "low" || site.status === "pending_review"
+      ? "pending_review"
+      : "uploading";
 
   const { data: versionRows, error: versionError } = await supabase
     .from("deployments")
@@ -1254,7 +1691,7 @@ async function createPersistentUploadSession(
     total_bytes: input.scan.totalBytes,
     entrypoint: input.scan.entrypoint,
     spa_fallback_enabled: input.scan.spaFallbackRecommended,
-    risk_score: input.scan.riskScore
+    risk_score: input.scan.riskScore,
   });
 
   if (deploymentError) {
@@ -1262,15 +1699,17 @@ async function createPersistentUploadSession(
   }
 
   if (input.scan.files.length > 0) {
-    const { error: filesError } = await supabase.from("deployment_files").insert(
-      input.scan.files.map((file) => ({
-        deployment_id: deploymentId,
-        path: file.path,
-        size: file.size,
-        content_type: file.contentType,
-        sha256: file.sha256 ?? null
-      }))
-    );
+    const { error: filesError } = await supabase
+      .from("deployment_files")
+      .insert(
+        input.scan.files.map((file) => ({
+          deployment_id: deploymentId,
+          path: file.path,
+          size: file.size,
+          content_type: file.contentType,
+          sha256: file.sha256 ?? null,
+        })),
+      );
 
     if (filesError) {
       throw new Error(filesError.message);
@@ -1279,13 +1718,15 @@ async function createPersistentUploadSession(
 
   const uploadSessionId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-  const { error: sessionError } = await supabase.from("upload_sessions").insert({
-    id: uploadSessionId,
-    site_id: input.siteId,
-    user_id: input.user.id,
-    status: hasBlockingIssues ? "blocked" : "created",
-    expires_at: expiresAt
-  });
+  const { error: sessionError } = await supabase
+    .from("upload_sessions")
+    .insert({
+      id: uploadSessionId,
+      site_id: input.siteId,
+      user_id: input.user.id,
+      status: hasBlockingIssues ? "blocked" : "created",
+      expires_at: expiresAt,
+    });
 
   if (sessionError) {
     throw new Error(sessionError.message);
@@ -1297,13 +1738,13 @@ async function createPersistentUploadSession(
     deployment_id: deploymentId,
     event_type: "upload_session.created",
     risk_score: input.scan.riskScore,
-    message: `Created upload session for deployment ${deploymentId}`
+    message: `Created upload session for deployment ${deploymentId}`,
   });
 
   return {
     uploadSessionId,
     deploymentId,
-    status: deploymentStatus
+    status: deploymentStatus,
   };
 }
 
@@ -1331,7 +1772,7 @@ type UploadTarget = {
 function resultFromScan(
   target: UploadTarget,
   scan: DeploymentScanResult,
-  status: UploadArchiveResult["status"]
+  status: UploadArchiveResult["status"],
 ): UploadArchiveResult {
   return {
     deploymentId: target.deploymentId,
@@ -1340,7 +1781,7 @@ function resultFromScan(
     fileCount: scan.fileCount,
     totalBytes: scan.totalBytes,
     riskLevel: scan.riskLevel,
-    issues: scan.issues
+    issues: scan.issues,
   };
 }
 
@@ -1350,7 +1791,11 @@ function getPublicUrlFromHostname(env: Env, hostname: string) {
 
 async function getPersistentUploadTarget(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; user: AuthenticatedUser }
+  input: {
+    uploadSessionId: string;
+    deploymentId: string;
+    user: AuthenticatedUser;
+  },
 ): Promise<UploadTarget> {
   const supabase = createServiceSupabase(env);
   const { data: session, error: sessionError } = await supabase
@@ -1369,7 +1814,10 @@ async function getPersistentUploadTarget(
   }
 
   if (Date.parse(session.expires_at) < Date.now()) {
-    await supabase.from("upload_sessions").update({ status: "expired" }).eq("id", input.uploadSessionId);
+    await supabase
+      .from("upload_sessions")
+      .update({ status: "expired" })
+      .eq("id", input.uploadSessionId);
     throw new Error("上传会话已过期，请重新创建");
   }
 
@@ -1384,7 +1832,10 @@ async function getPersistentUploadTarget(
     throw new Error("部署记录不存在或不属于当前上传会话");
   }
 
-  if (deployment.status !== "uploading" && deployment.status !== "pending_review") {
+  if (
+    deployment.status !== "uploading" &&
+    deployment.status !== "pending_review"
+  ) {
     throw new Error("当前部署状态不能继续上传");
   }
 
@@ -1396,13 +1847,20 @@ async function getPersistentUploadTarget(
     hostname: "",
     r2Prefix: deployment.r2_prefix,
     status: deployment.status,
-    spaFallbackEnabled: deployment.spa_fallback_enabled
+    spaFallbackEnabled: deployment.spa_fallback_enabled,
   };
 }
 
-async function refreshDeploymentFiles(env: Env, deploymentId: string, scan: DeploymentScanResult) {
+async function refreshDeploymentFiles(
+  env: Env,
+  deploymentId: string,
+  scan: DeploymentScanResult,
+) {
   const supabase = createServiceSupabase(env);
-  const { error: deleteError } = await supabase.from("deployment_files").delete().eq("deployment_id", deploymentId);
+  const { error: deleteError } = await supabase
+    .from("deployment_files")
+    .delete()
+    .eq("deployment_id", deploymentId);
 
   if (deleteError) {
     throw new Error(deleteError.message);
@@ -1418,8 +1876,8 @@ async function refreshDeploymentFiles(env: Env, deploymentId: string, scan: Depl
       path: file.path,
       size: file.size,
       content_type: file.contentType,
-      sha256: file.sha256 ?? null
-    }))
+      sha256: file.sha256 ?? null,
+    })),
   );
 
   if (insertError) {
@@ -1429,39 +1887,59 @@ async function refreshDeploymentFiles(env: Env, deploymentId: string, scan: Depl
 
 async function completePersistentDeploymentUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; prepared: PreparedDeployment; user: AuthenticatedUser }
+  input: {
+    uploadSessionId: string;
+    deploymentId: string;
+    prepared: PreparedDeployment;
+    user: AuthenticatedUser;
+  },
 ): Promise<UploadArchiveResult> {
   const target = await getPersistentUploadTarget(env, input);
   const prepared = input.prepared;
   const supabase = createServiceSupabase(env);
-  const { data: previousDeployments, error: previousDeploymentsError } = await supabase
-    .from("deployments")
-    .select("r2_prefix")
-    .eq("site_id", target.siteId)
-    .neq("id", target.deploymentId);
+  const { data: previousDeployments, error: previousDeploymentsError } =
+    await supabase
+      .from("deployments")
+      .select("r2_prefix")
+      .eq("site_id", target.siteId)
+      .neq("id", target.deploymentId);
 
-  if (previousDeploymentsError) throw new Error(previousDeploymentsError.message);
+  if (previousDeploymentsError)
+    throw new Error(previousDeploymentsError.message);
 
   if (hasBlockingIssues(prepared.scan.issues)) {
-    await supabase.from("deployments").update({ status: "blocked" }).eq("id", target.deploymentId);
-    await supabase.from("upload_sessions").update({ status: "blocked" }).eq("id", input.uploadSessionId);
+    await supabase
+      .from("deployments")
+      .update({ status: "blocked" })
+      .eq("id", target.deploymentId);
+    await supabase
+      .from("upload_sessions")
+      .update({ status: "blocked" })
+      .eq("id", input.uploadSessionId);
     await supabase.from("audit_events").insert({
       user_id: input.user.id,
       site_id: target.siteId,
       deployment_id: target.deploymentId,
       event_type: "deployment.blocked",
       risk_score: prepared.scan.riskScore,
-      message: "Server scan blocked the uploaded archive"
+      message: "Server scan blocked the uploaded archive",
     });
     return resultFromScan(target, prepared.scan, "blocked");
   }
 
-  await supabase.from("upload_sessions").update({ status: "uploading" }).eq("id", input.uploadSessionId);
+  await supabase
+    .from("upload_sessions")
+    .update({ status: "uploading" })
+    .eq("id", input.uploadSessionId);
   await putDeploymentFiles(env, target.r2Prefix, prepared.files);
   await refreshDeploymentFiles(env, target.deploymentId, prepared.scan);
 
-  const finalStatus = target.status === "pending_review" || prepared.scan.riskLevel !== "low" ? "pending_review" : "active";
-  const activatedAt = finalStatus === "active" ? new Date().toISOString() : null;
+  const finalStatus =
+    target.status === "pending_review" || prepared.scan.riskLevel !== "low"
+      ? "pending_review"
+      : "active";
+  const activatedAt =
+    finalStatus === "active" ? new Date().toISOString() : null;
   const { error: deploymentError } = await supabase
     .from("deployments")
     .update({
@@ -1471,7 +1949,7 @@ async function completePersistentDeploymentUpload(
       entrypoint: prepared.scan.entrypoint,
       spa_fallback_enabled: prepared.scan.spaFallbackRecommended,
       risk_score: prepared.scan.riskScore,
-      activated_at: activatedAt
+      activated_at: activatedAt,
     })
     .eq("id", target.deploymentId);
 
@@ -1484,7 +1962,7 @@ async function completePersistentDeploymentUpload(
       .from("sites")
       .update({
         status: "active",
-        active_deployment_id: target.deploymentId
+        active_deployment_id: target.deploymentId,
       })
       .eq("id", target.siteId)
       .eq("user_id", input.user.id);
@@ -1494,29 +1972,55 @@ async function completePersistentDeploymentUpload(
     }
   }
 
-  await supabase.from("upload_sessions").update({ status: "completed" }).eq("id", input.uploadSessionId);
+  await supabase
+    .from("upload_sessions")
+    .update({ status: "completed" })
+    .eq("id", input.uploadSessionId);
   await supabase.from("audit_events").insert({
     user_id: input.user.id,
     site_id: target.siteId,
     deployment_id: target.deploymentId,
-    event_type: finalStatus === "active" ? "deployment.activated" : "deployment.pending_review",
+    event_type:
+      finalStatus === "active"
+        ? "deployment.activated"
+        : "deployment.pending_review",
     risk_score: prepared.scan.riskScore,
-    message: `Deployment ${target.deploymentId} uploaded with status ${finalStatus}`
+    message: `Deployment ${target.deploymentId} uploaded with status ${finalStatus}`,
   });
 
-  const { data: boundDomains } = await supabase.from("domains").select("hostname, status").eq("site_id", target.siteId).neq("status", "deleted");
-  if (boundDomains?.[0]?.hostname) target.publicUrl = getPublicUrlFromHostname(env, boundDomains[0].hostname);
-  await Promise.all((boundDomains ?? []).map((domain) => cachePublicSlot(env, domain, target.siteId, {
-    id: target.deploymentId,
-    r2_prefix: target.r2Prefix,
-    spa_fallback_enabled: prepared.scan.spaFallbackRecommended
-  })));
+  const { data: boundDomains } = await supabase
+    .from("domains")
+    .select("hostname, status")
+    .eq("site_id", target.siteId)
+    .neq("status", "deleted");
+  if (boundDomains?.[0]?.hostname)
+    target.publicUrl = getPublicUrlFromHostname(env, boundDomains[0].hostname);
+  await Promise.all(
+    (boundDomains ?? []).map((domain) =>
+      cachePublicSlot(env, domain, target.siteId, {
+        id: target.deploymentId,
+        r2_prefix: target.r2Prefix,
+        spa_fallback_enabled: prepared.scan.spaFallbackRecommended,
+      }),
+    ),
+  );
   if (finalStatus === "active") {
     const previous = previousDeployments ?? [];
-    const cleanupResults = await Promise.allSettled(previous.map((deployment) => deleteDeploymentPrefix(env, deployment.r2_prefix)));
-    const cleanedPrefixes = previous.filter((_, index) => cleanupResults[index]?.status === "fulfilled").map((deployment) => deployment.r2_prefix);
+    const cleanupResults = await Promise.allSettled(
+      previous.map((deployment) =>
+        deleteDeploymentPrefix(env, deployment.r2_prefix),
+      ),
+    );
+    const cleanedPrefixes = previous
+      .filter((_, index) => cleanupResults[index]?.status === "fulfilled")
+      .map((deployment) => deployment.r2_prefix);
     if (cleanedPrefixes.length > 0) {
-      await supabase.from("deployments").update({ status: "superseded" }).eq("site_id", target.siteId).neq("id", target.deploymentId).in("r2_prefix", cleanedPrefixes);
+      await supabase
+        .from("deployments")
+        .update({ status: "superseded" })
+        .eq("site_id", target.siteId)
+        .neq("id", target.deploymentId)
+        .in("r2_prefix", cleanedPrefixes);
     }
   }
   return resultFromScan(target, prepared.scan, finalStatus);
@@ -1524,7 +2028,11 @@ async function completePersistentDeploymentUpload(
 
 async function completeMemoryDeploymentUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; prepared: PreparedDeployment }
+  input: {
+    uploadSessionId: string;
+    deploymentId: string;
+    prepared: PreparedDeployment;
+  },
 ): Promise<UploadArchiveResult> {
   const session = memoryUploadSessions.get(input.uploadSessionId);
 
@@ -1550,8 +2058,9 @@ async function completeMemoryDeploymentUpload(
     publicUrl: getSiteUrl(env, session.subdomain),
     hostname: getDistributionHostname(env, session.subdomain),
     r2Prefix: session.r2Prefix,
-    status: session.status === "pending_review" ? "pending_review" : "uploading",
-    spaFallbackEnabled: session.spaFallbackEnabled
+    status:
+      session.status === "pending_review" ? "pending_review" : "uploading",
+    spaFallbackEnabled: session.spaFallbackEnabled,
   };
   const prepared = input.prepared;
 
@@ -1562,7 +2071,10 @@ async function completeMemoryDeploymentUpload(
 
   await putDeploymentFiles(env, target.r2Prefix, prepared.files);
 
-  const finalStatus = target.status === "pending_review" || prepared.scan.riskLevel !== "low" ? "pending_review" : "active";
+  const finalStatus =
+    target.status === "pending_review" || prepared.scan.riskLevel !== "low"
+      ? "pending_review"
+      : "active";
   site.status = finalStatus === "active" ? "active" : "pending_review";
 
   const mapping: DomainMapping = {
@@ -1571,7 +2083,7 @@ async function completeMemoryDeploymentUpload(
     deploymentId: target.deploymentId,
     r2Prefix: target.r2Prefix,
     spaFallbackEnabled: prepared.scan.spaFallbackRecommended,
-    status: finalStatus
+    status: finalStatus,
   };
 
   const cached = await writeDomainCache(env, target.subdomain, mapping);
@@ -1587,7 +2099,12 @@ async function completeMemoryDeploymentUpload(
 
 async function completeDeploymentUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; prepared: PreparedDeployment; user?: AuthenticatedUser }
+  input: {
+    uploadSessionId: string;
+    deploymentId: string;
+    prepared: PreparedDeployment;
+    user?: AuthenticatedUser;
+  },
 ) {
   if (hasServiceSupabase(env)) {
     if (!input.user) {
@@ -1599,7 +2116,7 @@ async function completeDeploymentUpload(
       uploadSessionId: input.uploadSessionId,
       deploymentId: input.deploymentId,
       prepared: input.prepared,
-      user: input.user
+      user: input.user,
     });
   }
 
@@ -1608,34 +2125,52 @@ async function completeDeploymentUpload(
 
 export async function completeArchiveUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; archive: File; user?: AuthenticatedUser }
+  input: {
+    uploadSessionId: string;
+    deploymentId: string;
+    archive: File;
+    user?: AuthenticatedUser;
+  },
 ) {
   return completeDeploymentUpload(env, {
     uploadSessionId: input.uploadSessionId,
     deploymentId: input.deploymentId,
     prepared: await readDeployableArchive(input.archive),
-    user: input.user
+    user: input.user,
   });
 }
 
 export async function completeFilesUpload(
   env: Env,
-  input: { uploadSessionId: string; deploymentId: string; files: Array<{ file: File; path: string }>; user?: AuthenticatedUser }
+  input: {
+    uploadSessionId: string;
+    deploymentId: string;
+    files: Array<{ file: File; path: string }>;
+    user?: AuthenticatedUser;
+  },
 ) {
   return completeDeploymentUpload(env, {
     uploadSessionId: input.uploadSessionId,
     deploymentId: input.deploymentId,
     prepared: await readDeployableFiles(input.files),
-    user: input.user
+    user: input.user,
   });
 }
 
 async function provisionLegacyWelcomeDeployment(
   env: Env,
   domain: { hostname: string; site_id: string; status: string },
-  site: { active_deployment_id: string | null; status: string; user_id: string }
+  site: {
+    active_deployment_id: string | null;
+    status: string;
+    user_id: string;
+  },
 ) {
-  if (site.active_deployment_id || domain.status !== "active" || site.status === "blocked") {
+  if (
+    site.active_deployment_id ||
+    domain.status !== "active" ||
+    site.status === "blocked"
+  ) {
     return null;
   }
 
@@ -1665,7 +2200,7 @@ async function provisionLegacyWelcomeDeployment(
     entrypoint: "index.html",
     spa_fallback_enabled: true,
     risk_score: 0,
-    activated_at: activatedAt
+    activated_at: activatedAt,
   });
 
   if (deploymentError) {
@@ -1674,15 +2209,17 @@ async function provisionLegacyWelcomeDeployment(
 
   try {
     await getSiteAssets(env).put(`${r2Prefix}/index.html`, content, {
-      httpMetadata: { contentType: "text/html;charset=utf-8" }
+      httpMetadata: { contentType: "text/html;charset=utf-8" },
     });
 
-    const { error: fileError } = await supabase.from("deployment_files").insert({
-      deployment_id: deploymentId,
-      path: "index.html",
-      size: content.byteLength,
-      content_type: "text/html;charset=utf-8"
-    });
+    const { error: fileError } = await supabase
+      .from("deployment_files")
+      .insert({
+        deployment_id: deploymentId,
+        path: "index.html",
+        size: content.byteLength,
+        content_type: "text/html;charset=utf-8",
+      });
     if (fileError) throw new Error(fileError.message);
 
     const { data: activatedSite, error: siteError } = await supabase
@@ -1692,7 +2229,8 @@ async function provisionLegacyWelcomeDeployment(
       .is("active_deployment_id", null)
       .select("id")
       .maybeSingle();
-    if (siteError || !activatedSite) throw new Error(siteError?.message ?? "Site was activated concurrently");
+    if (siteError || !activatedSite)
+      throw new Error(siteError?.message ?? "Site was activated concurrently");
 
     await supabase.from("audit_events").insert({
       user_id: site.user_id,
@@ -1700,7 +2238,8 @@ async function provisionLegacyWelcomeDeployment(
       deployment_id: deploymentId,
       event_type: "deployment.legacy_welcome_page_created",
       risk_score: 0,
-      message: "Created the default welcome page for a legacy site without an active deployment"
+      message:
+        "Created the default welcome page for a legacy site without an active deployment",
     });
 
     const mapping: DomainMapping = {
@@ -1709,14 +2248,14 @@ async function provisionLegacyWelcomeDeployment(
       deploymentId,
       r2Prefix,
       spaFallbackEnabled: true,
-      status: "active"
+      status: "active",
     };
     await writeDomainCache(env, domain.hostname.split(".")[0] ?? "", mapping);
     return mapping;
   } catch {
     await Promise.allSettled([
       deleteDeploymentPrefix(env, r2Prefix),
-      supabase.from("deployments").delete().eq("id", deploymentId)
+      supabase.from("deployments").delete().eq("id", deploymentId),
     ]);
     return null;
   }
@@ -1778,7 +2317,10 @@ export async function getDomainMapping(env: Env, hostname: string) {
     deploymentId: deployment.id,
     r2Prefix: deployment.r2_prefix,
     spaFallbackEnabled: deployment.spa_fallback_enabled,
-    status: domain.status === "blocked" || deployment.status === "blocked" ? "blocked" : "active"
+    status:
+      domain.status === "blocked" || deployment.status === "blocked"
+        ? "blocked"
+        : "active",
   };
 
   await writeDomainCache(env, subdomain, mapping);
