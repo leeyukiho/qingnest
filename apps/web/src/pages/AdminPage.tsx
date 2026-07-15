@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { normalizeHostname, platformDomainType } from "@qingnest/shared/config/domain";
 import { Activity, Ban, Bell, CircleDollarSign, Crown, ExternalLink, FolderKanban, Gauge, Globe2, LayoutDashboard, Loader2, Lock, Plus, RefreshCw, RotateCcw, Save, Search, Send, ServerCog, ShieldAlert, Trash2, Users, WalletCards, X } from "lucide-react";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { RouteMessage, StudioLoading } from "@/app/feedback";
@@ -100,6 +101,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [pendingError, setPendingError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [domainForm, setDomainForm] = useState({
     userId: "",
@@ -169,6 +171,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
   }
 
   function confirm(action: PendingAction) {
+    setPendingError(null);
     setPending(action);
   }
   async function execute() {
@@ -180,7 +183,9 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
       setPending(null);
       await load(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "操作失败");
+      const message = cause instanceof Error ? cause.message : "操作失败";
+      setPendingError(message);
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -373,7 +378,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
               </DataTable>
             ) : null}
           </main>
-          <ConfirmDialog busy={busy} confirmLabel={pending?.confirmLabel} confirmationText={pending?.confirmationText} description={pending?.description ?? ""} destructive={pending?.destructive} onCancel={() => !busy && setPending(null)} onConfirm={() => void execute()} open={Boolean(pending)} title={pending?.title ?? "确认操作"} />
+          <ConfirmDialog busy={busy} confirmLabel={pending?.confirmLabel} confirmationText={pending?.confirmationText} description={pending?.description ?? ""} destructive={pending?.destructive} error={pendingError} onCancel={() => !busy && setPending(null)} onConfirm={() => void execute()} open={Boolean(pending)} title={pending?.title ?? "确认操作"} />
         </div>
       </section>
     </div>
@@ -1089,7 +1094,8 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
           <div className="mt-4 grid items-end gap-3 bg-amber-400/[0.04] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_9rem_8rem_auto]">
             <label className="grid min-w-0 gap-1 text-xs text-zinc-500">
               新域名后缀
-              <ClearableInput aria-label="新域名后缀" onChange={(e) => setNewSuffix(e.target.value)} placeholder="pages.example.com" value={newSuffix} />
+              <ClearableInput aria-label="新域名后缀" onChange={(e) => { setNewSuffix(e.target.value); setFieldErrors((all) => ({ ...all, newSuffix: "" })); }} placeholder="pages.example.com" value={newSuffix} />
+              <FieldError message={fieldErrors.newSuffix} />
             </label>
             <label className="relative grid min-w-0 gap-1 text-xs text-zinc-500">
               价格（元）
@@ -1120,19 +1126,27 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                   setFieldErrors((all) => ({ ...all, newPrice: numberError }));
                   return;
                 }
-                const suffix = newSuffix.trim().toLowerCase().replace(/^\.+/, "");
+                const normalized = normalizeHostname(newSuffix);
+                if (!normalized.ok) {
+                  setFieldErrors((all) => ({ ...all, newSuffix: normalized.reason }));
+                  return;
+                }
+                const suffix = normalized.ascii;
                 confirm({
                   title: "新增平台域名",
-                  description: `新增 ${suffix}，价格 ¥${Number(newPrice).toFixed(2)}，${newBillingPeriod === "month" ? "按月" : newBillingPeriod === "year" ? "按年" : "一次性"}计费。`,
-                  run: () =>
-                    createAdminDomainPrice({
-                      domain_type: suffix.replace(/[^a-z0-9]+/g, "_"),
-                      label: suffix,
+                  description: `新增 ${normalized.display}${normalized.display !== suffix ? `（${suffix}）` : ""}，价格 ¥${Number(newPrice).toFixed(2)}，${newBillingPeriod === "month" ? "按月" : newBillingPeriod === "year" ? "按年" : "一次性"}计费。`,
+                  run: async () => {
+                    const created = await createAdminDomainPrice({
+                      domain_type: platformDomainType(suffix),
+                      label: normalized.display,
                       hostname_suffix: suffix,
                       price_cents: Math.round(Number(newPrice) * 100),
                       billing_period: newBillingPeriod,
                       enabled: true,
-                    }),
+                    });
+                    setNewSuffix("");
+                    return created;
+                  },
                 });
               }}
               type="button"

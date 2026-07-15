@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
 import { unzipSync } from "fflate";
+import { normalizeHostname, platformDomainType } from "@qingnest/shared/config/domain";
 import {
   getPlanConfig,
   getPublicSiteUrl,
@@ -1216,7 +1217,9 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
   const supabase = await requireAdmin(env, user);
   const { data: current, error: currentError } = await supabase.from("domain_pricing").select("*").eq("domain_type", type).single();
   if (currentError || !current) throw new Error(currentError?.message ?? "平台域名不存在");
-  const requestedSuffix = update.hostname_suffix?.trim().toLowerCase().replace(/^\.+/, "");
+  const normalizedSuffix = update.hostname_suffix ? normalizeHostname(update.hostname_suffix) : null;
+  if (normalizedSuffix && !normalizedSuffix.ok) throw new Error(normalizedSuffix.reason);
+  const requestedSuffix = normalizedSuffix?.ascii;
   if (current.cloudflare_zone_id && requestedSuffix && requestedSuffix !== current.hostname_suffix) {
     throw new Error("已接入 Cloudflare 的域名后缀不能直接修改，请新增域名后再下架旧域名");
   }
@@ -1237,10 +1240,13 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
 
 export async function createAdminDomainPrice(env: Env, user: AuthenticatedUser, input: Database["public"]["Tables"]["domain_pricing"]["Insert"]) {
   const supabase = await requireAdmin(env, user);
-  const suffix = input.hostname_suffix.trim().toLowerCase().replace(/^\.+/, "");
-  if (!/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(suffix)) throw new Error("请输入有效的根域名，例如 example.com");
-  const key = input.domain_type.trim().toLowerCase();
-  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, hostname_suffix: suffix, enabled: false, setup_status: "pending_zone", next_check_at: new Date().toISOString() }).select("*").single();
+  const normalized = normalizeHostname(input.hostname_suffix);
+  if (!normalized.ok) throw new Error(normalized.reason);
+  const suffix = normalized.ascii;
+  const key = platformDomainType(suffix);
+  const normalizedLabel = normalizeHostname(input.label);
+  const label = normalizedLabel.ok && normalizedLabel.ascii === suffix ? normalizedLabel.display : normalized.display;
+  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, label, hostname_suffix: suffix, enabled: false, setup_status: "pending_zone", next_check_at: new Date().toISOString() }).select("*").single();
   if (error) throw new Error(error.code === "23505" ? "该平台域名已存在" : error.message);
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.created", message: `管理员新增平台域名 ${suffix}` });
   try {

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./config/domain": "./src/config/domain.ts",
     "./config/platform": "./src/config/platform.ts",
     "./config/schema": "./src/config/schema.ts",
     "./deployment/mime": "./src/deployment/mime.ts",
