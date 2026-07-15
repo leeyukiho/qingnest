@@ -25,6 +25,7 @@ import {
 } from "./supabase";
 import type { Database, ProfileRole } from "./supabase";
 import type { DomainMapping, Env } from "./types";
+import { provisionPlatformDomain } from "./platform-domains";
 
 type DraftSite = {
   id: string;
@@ -200,12 +201,23 @@ function getSiteAssets(env: Env) {
   return env.SITE_ASSETS;
 }
 
-async function readDomainCache(env: Env, subdomain: string) {
+async function readDomainCache(env: Env, hostname: string) {
   if (!env.DOMAIN_MAP) {
     return null;
   }
+  const normalized = hostname.toLowerCase();
+  const exact = await env.DOMAIN_MAP.get(normalized).catch(() => null);
+  if (exact || !normalized.includes(".")) return exact;
 
-  return env.DOMAIN_MAP.get(subdomain).catch(() => null);
+  // Older deployments keyed mappings by the first label. Accept a matching
+  // legacy entry while new writes migrate naturally to the full hostname.
+  const legacy = await env.DOMAIN_MAP.get(normalized.split(".")[0] ?? normalized).catch(() => null);
+  if (!legacy) return null;
+  try {
+    return (JSON.parse(legacy) as DomainMapping).hostname.toLowerCase() === normalized ? legacy : null;
+  } catch {
+    return null;
+  }
 }
 
 function cacheDomainMapping(hostname: string, value: DomainMapping | null) {
@@ -254,7 +266,7 @@ function invalidateMemoryDomainMapping(subdomain: string) {
 
 async function writeDomainCache(
   env: Env,
-  subdomain: string,
+  _cacheKey: string,
   mapping: DomainMapping,
 ) {
   cacheDomainMapping(mapping.hostname, mapping);
@@ -264,18 +276,30 @@ async function writeDomainCache(
   }
 
   try {
-    await env.DOMAIN_MAP.put(subdomain, JSON.stringify(mapping));
+    await env.DOMAIN_MAP.put(mapping.hostname.toLowerCase(), JSON.stringify(mapping));
     return true;
   } catch {
     return false;
   }
 }
 
-async function deleteDomainCache(env: Env, subdomain: string) {
-  invalidateMemoryDomainMapping(subdomain);
+async function deleteDomainCache(env: Env, hostname: string) {
+  const normalized = hostname.toLowerCase();
+  invalidateMemoryDomainMapping(normalized);
   if (!env.DOMAIN_MAP) return false;
   try {
-    await env.DOMAIN_MAP.delete(subdomain);
+    await env.DOMAIN_MAP.delete(normalized);
+    if (normalized.includes(".")) {
+      const legacyKey = normalized.split(".")[0] ?? normalized;
+      const legacy = await env.DOMAIN_MAP.get(legacyKey);
+      if (legacy) {
+        try {
+          if ((JSON.parse(legacy) as DomainMapping).hostname.toLowerCase() === normalized) await env.DOMAIN_MAP.delete(legacyKey);
+        } catch {
+          // Leave unrelated or malformed legacy data untouched.
+        }
+      }
+    }
     return true;
   } catch {
     return false;
@@ -870,7 +894,7 @@ export async function checkSubdomainAvailability(
   const suffix = hostnameSuffix?.trim().toLowerCase().replace(/^\.+/, "");
   if (suffix && hasServiceSupabase(env)) {
     const supabase = createServiceSupabase(env);
-    const { data } = await supabase.from("domain_pricing").select("hostname_suffix").eq("hostname_suffix", suffix).eq("enabled", true).maybeSingle();
+    const { data } = await supabase.from("domain_pricing").select("hostname_suffix").eq("hostname_suffix", suffix).eq("enabled", true).eq("setup_status", "active").maybeSingle();
     if (!data) return { available: false, normalized: validation.normalized, reason: "该平台域名暂不可选" };
   }
   const hostname = suffix ? `${validation.normalized}.${suffix}` : getDistributionHostname(env, validation.normalized);
@@ -1121,7 +1145,7 @@ export async function updateAdminSite(env: Env, user: AuthenticatedUser, input: 
   const { data: domains } = await supabase.from("domains").select("hostname").eq("site_id", input.siteId).neq("status", "deleted");
   if (input.status === "blocked") {
     await supabase.from("domains").update({ status: "blocked" }).eq("site_id", input.siteId).neq("status", "deleted");
-    await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname)));
+    await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname)));
   } else if ((input.status === "active" || input.status === "pending_review") && data.active_deployment_id) {
     const domainStatus = input.status === "active" ? "active" : "pending_review";
     await supabase.from("domains").update({ status: domainStatus }).eq("site_id", input.siteId).neq("status", "deleted");
@@ -1137,6 +1161,10 @@ export async function createAdminDomain(env: Env, user: AuthenticatedUser, input
   const supabase = await requireAdmin(env, user);
   const hostname = input.hostname.trim().toLowerCase();
   if (!hostname || !hostname.includes(".")) throw new Error("请输入完整域名");
+  if (input.type === "platform_subdomain") {
+    const { data: suffixes } = await supabase.from("domain_pricing").select("hostname_suffix").eq("enabled", true).eq("setup_status", "active");
+    if (!(suffixes ?? []).some((item) => hostname.endsWith(`.${item.hostname_suffix}`))) throw new Error("该平台域名尚未完成 Cloudflare 接入或未上架");
+  }
   if (input.siteId) {
     const { data: site } = await supabase.from("sites").select("id, user_id").eq("id", input.siteId).eq("user_id", input.userId).neq("status", "deleted").maybeSingle();
     if (!site) throw new Error("项目不存在或不属于该用户");
@@ -1161,7 +1189,7 @@ export async function updateAdminDomain(env: Env, user: AuthenticatedUser, input
   if (input.siteId !== undefined) { update.site_id = input.siteId; update.last_binding_change_at = new Date().toISOString(); }
   const { data, error } = await supabase.from("domains").update(update).eq("id", input.domainId).select("id, hostname, status, site_id").single();
   if (error) throw new Error(error.message);
-  await deleteDomainCache(env, current.hostname.split(".")[0] ?? current.hostname);
+  await deleteDomainCache(env, current.hostname);
   await supabase.from("audit_events").insert({ user_id: user.id, site_id: input.siteId ?? current.site_id, event_type: "admin.domain.updated", message: `管理员更新域名 ${current.hostname}` });
   return data;
 }
@@ -1170,7 +1198,7 @@ export async function deleteAdminDomain(env: Env, user: AuthenticatedUser, domai
   const supabase = await requireAdmin(env, user);
   const { data, error } = await supabase.from("domains").update({ status: "deleted", site_id: null }).eq("id", domainId).neq("status", "deleted").select("id, hostname").single();
   if (error || !data) throw new Error(error?.message ?? "域名不存在");
-  await deleteDomainCache(env, data.hostname.split(".")[0] ?? data.hostname);
+  await deleteDomainCache(env, data.hostname);
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain.deleted", message: `管理员删除域名 ${data.hostname}` });
   return { id: data.id };
 }
@@ -1186,8 +1214,22 @@ export async function updateAdminPlan(env: Env, user: AuthenticatedUser, key: st
 
 export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, type: string, update: Database["public"]["Tables"]["domain_pricing"]["Update"]) {
   const supabase = await requireAdmin(env, user);
-  delete update.domain_type;
-  const { data, error } = await supabase.from("domain_pricing").update({ ...update, updated_at: new Date().toISOString() }).eq("domain_type", type).select("*").single();
+  const { data: current, error: currentError } = await supabase.from("domain_pricing").select("*").eq("domain_type", type).single();
+  if (currentError || !current) throw new Error(currentError?.message ?? "平台域名不存在");
+  const requestedSuffix = update.hostname_suffix?.trim().toLowerCase().replace(/^\.+/, "");
+  if (current.cloudflare_zone_id && requestedSuffix && requestedSuffix !== current.hostname_suffix) {
+    throw new Error("已接入 Cloudflare 的域名后缀不能直接修改，请新增域名后再下架旧域名");
+  }
+  if (update.enabled && current.setup_status !== "active") throw new Error("Cloudflare 接入完成前不能上架该域名");
+  const safeUpdate = {
+    label: update.label,
+    hostname_suffix: requestedSuffix,
+    price_cents: update.price_cents,
+    billing_period: update.billing_period,
+    enabled: update.enabled,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from("domain_pricing").update(safeUpdate).eq("domain_type", type).select("*").single();
   if (error) throw new Error(error.message);
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.updated", message: `管理员更新域名定价 ${type}` });
   return data;
@@ -1196,12 +1238,22 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
 export async function createAdminDomainPrice(env: Env, user: AuthenticatedUser, input: Database["public"]["Tables"]["domain_pricing"]["Insert"]) {
   const supabase = await requireAdmin(env, user);
   const suffix = input.hostname_suffix.trim().toLowerCase().replace(/^\.+/, "");
-  if (!suffix.includes(".")) throw new Error("请输入完整的平台域名后缀");
+  if (!/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(suffix)) throw new Error("请输入有效的根域名，例如 example.com");
   const key = input.domain_type.trim().toLowerCase();
-  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, hostname_suffix: suffix }).select("*").single();
+  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, hostname_suffix: suffix, enabled: false, setup_status: "pending_zone", next_check_at: new Date().toISOString() }).select("*").single();
   if (error) throw new Error(error.code === "23505" ? "该平台域名已存在" : error.message);
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.created", message: `管理员新增平台域名 ${suffix}` });
-  return data;
+  try {
+    return await provisionPlatformDomain(env, data.domain_type);
+  } catch {
+    const { data: failed } = await supabase.from("domain_pricing").select("*").eq("domain_type", data.domain_type).single();
+    return failed ?? data;
+  }
+}
+
+export async function syncAdminDomainPrice(env: Env, user: AuthenticatedUser, type: string) {
+  await requireAdmin(env, user);
+  return provisionPlatformDomain(env, type);
 }
 
 export async function deleteAdminDomainPrice(env: Env, user: AuthenticatedUser, type: string) {
@@ -1518,7 +1570,7 @@ export async function deleteProject(
     .eq("site_id", siteId)
     .eq("user_id", user.id);
   if (domainError) throw new Error(domainError.message);
-  await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname.split(".")[0] ?? domain.hostname)));
+  await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname)));
   const { error } = await supabase
     .from("sites")
     .update({
@@ -1744,7 +1796,7 @@ export async function listPlatformDomainCatalog(env: Env) {
   const fallback = getWorkerPlatformConfig(env).domains.distributionRoot;
   if (!hasServiceSupabase(env)) return [{ domain_type: "platform_subdomain", label: fallback, hostname_suffix: fallback, price_cents: 990, billing_period: "year", enabled: true }];
   const supabase = createServiceSupabase(env);
-  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, enabled").eq("enabled", true).order("price_cents");
+  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, enabled").eq("enabled", true).eq("setup_status", "active").order("price_cents");
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -1789,10 +1841,7 @@ export async function switchPublicSlot(
       .eq("id", domain.id)
       .eq("user_id", input.user.id);
     if (error) throw new Error(error.message);
-    await deleteDomainCache(
-      env,
-      domain.hostname.split(".")[0] ?? domain.hostname,
-    );
+    await deleteDomainCache(env, domain.hostname);
   } else {
     const { deployment } = await getOwnedPublishableSite(
       env,
@@ -2562,7 +2611,7 @@ async function provisionLegacyWelcomeDeployment(
       spaFallbackEnabled: true,
       status: "active",
     };
-    await writeDomainCache(env, domain.hostname.split(".")[0] ?? "", mapping);
+    await writeDomainCache(env, domain.hostname, mapping);
     return mapping;
   } catch {
     await Promise.allSettled([
@@ -2574,8 +2623,7 @@ async function provisionLegacyWelcomeDeployment(
 }
 
 async function loadDomainMapping(env: Env, hostname: string) {
-  const subdomain = hostname.split(".")[0] ?? "";
-  const value = await readDomainCache(env, subdomain);
+  const value = await readDomainCache(env, hostname);
 
   if (value) {
     return JSON.parse(value) as DomainMapping;
@@ -2635,7 +2683,7 @@ async function loadDomainMapping(env: Env, hostname: string) {
         : "active",
   };
 
-  await writeDomainCache(env, subdomain, mapping);
+  await writeDomainCache(env, hostname, mapping);
   return mapping;
 }
 

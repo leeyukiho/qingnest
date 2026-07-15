@@ -1,6 +1,7 @@
 ENVIRONMENT=development
 APP_HOST=app.example.com
 DISTRIBUTION_ROOT=sites.example.com
+CLOUDFLARE_WORKER_SCRIPT=qingnest-worker
 PUBLIC_PROTOCOL=https
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=replace-with-public-anon-key

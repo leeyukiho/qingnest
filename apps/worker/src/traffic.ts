@@ -22,6 +22,7 @@ type AccelerationRow = {
 };
 type ActiveDeployment = { id: string; r2_prefix: string; file_count: number };
 type TrafficSample = { hostname: string; requests: number; bytes_sent: number; page_views?: number };
+type PlatformZone = { hostname_suffix: string; cloudflare_zone_id: string };
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 const trafficLimitCache = new Map<string, { limited: boolean; expiresAt: number }>();
@@ -94,22 +95,34 @@ async function trafficByHostname(env: Env) {
 
 async function acceleratedTraffic(env: Env, hostnames: string[]) {
   if (!hostnames.length) return [];
+  const db = createServiceSupabase(env) as any;
+  const { data } = await db.from("domain_pricing").select("hostname_suffix, cloudflare_zone_id").eq("setup_status", "active").not("cloudflare_zone_id", "is", null);
+  const zones = (data ?? []) as PlatformZone[];
+  const grouped = new Map<string, string[]>();
+  for (const hostname of hostnames) {
+    const zone = zones.find((item) => hostname === item.hostname_suffix || hostname.endsWith(`.${item.hostname_suffix}`));
+    const zoneId = zone?.cloudflare_zone_id ?? env.CLOUDFLARE_ZONE_ID!;
+    grouped.set(zoneId, [...(grouped.get(zoneId) ?? []), hostname]);
+  }
   const since = new Date(Date.now() - platformConfig.trafficAcceleration.evaluationWindowMinutes * 60_000).toISOString();
-  const response = await fetch(`${CF_API}/graphql`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      query: `query($zone: string!, $since: Time!, $hosts: [string!]) { viewer { zones(filter: { zoneTag: $zone }) { httpRequestsAdaptiveGroups(limit: 5000, filter: { datetime_geq: $since, clientRequestHTTPHost_in: $hosts }) { dimensions { clientRequestHTTPHost } sum { requests bytes } } } } }`,
-      variables: { zone: env.CLOUDFLARE_ZONE_ID, since, hosts: hostnames },
-    }),
-  });
-  const body = (await response.json()) as any;
-  if (!response.ok || body.errors?.length) throw new Error(body.errors?.[0]?.message ?? `Cloudflare GraphQL ${response.status}`);
-  return (body.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? []).map((item: any) => ({
-    hostname: item.dimensions.clientRequestHTTPHost,
-    requests: Number(item.sum.requests ?? 0),
-    bytes_sent: Number(item.sum.bytes ?? 0),
+  const samples = await Promise.all([...grouped].map(async ([zoneId, hosts]) => {
+    const response = await fetch(`${CF_API}/graphql`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `query($zone: string!, $since: Time!, $hosts: [string!]) { viewer { zones(filter: { zoneTag: $zone }) { httpRequestsAdaptiveGroups(limit: 5000, filter: { datetime_geq: $since, clientRequestHTTPHost_in: $hosts }) { dimensions { clientRequestHTTPHost } sum { requests bytes } } } } }`,
+        variables: { zone: zoneId, since, hosts },
+      }),
+    });
+    const body = (await response.json()) as any;
+    if (!response.ok || body.errors?.length) throw new Error(body.errors?.[0]?.message ?? `Cloudflare GraphQL ${response.status}`);
+    return (body.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? []).map((item: any) => ({
+      hostname: item.dimensions.clientRequestHTTPHost,
+      requests: Number(item.sum.requests ?? 0),
+      bytes_sent: Number(item.sum.bytes ?? 0),
+    }));
   }));
+  return samples.flat();
 }
 
 async function availablePagesProjects(env: Env) {
@@ -118,6 +131,13 @@ async function availablePagesProjects(env: Env) {
     `/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/pages/projects?per_page=100`,
   );
   return Math.max(0, platformConfig.trafficAcceleration.maxPagesProjects - projects.length);
+}
+
+async function zoneIdForHostname(env: Env, hostname: string) {
+  const db = createServiceSupabase(env) as any;
+  const { data } = await db.from("domain_pricing").select("hostname_suffix, cloudflare_zone_id").eq("setup_status", "active").not("cloudflare_zone_id", "is", null);
+  const zone = (data ?? []).find((item: PlatformZone) => hostname === item.hostname_suffix || hostname.endsWith(`.${item.hostname_suffix}`));
+  return zone?.cloudflare_zone_id ?? env.CLOUDFLARE_ZONE_ID!;
 }
 
 function accelerationScore(sample: TrafficSample, fileCount: number, plan: string) {
@@ -215,7 +235,8 @@ async function promote(env: Env, row: AccelerationRow, activeDeployment?: Active
     if (domain.status !== "active") throw new Error(`Pages custom domain is ${domain.status ?? "pending"}; will retry before switching traffic`);
     const pagesHealth = await fetch(pagesDeployment.url, { redirect: "manual", headers: { "user-agent": "QingNest-Lifecycle/1.0" } });
     if (pagesHealth.status >= 500) throw new Error(`Pages deployment health check returned ${pagesHealth.status}`);
-    const route = await cf<{ id: string }>(env, `/zones/${env.CLOUDFLARE_ZONE_ID}/workers/routes`, { method: "POST", body: JSON.stringify({ pattern: `${row.hostname}/*`, script: null }) });
+    const zoneId = await zoneIdForHostname(env, row.hostname);
+    const route = await cf<{ id: string }>(env, `/zones/${zoneId}/workers/routes`, { method: "POST", body: JSON.stringify({ pattern: `${row.hostname}/*`, script: null }) });
     await supabase.from("pages_accelerations").update({ status: "accelerated", pages_deployment_id: pagesDeployment.id, source_deployment_id: deployment.id, bypass_route_id: route.id, accelerated_at: new Date().toISOString(), retry_count: 0, last_error: null, updated_at: new Date().toISOString() }).eq("site_id", row.site_id);
   } catch (error) {
     await supabase.from("pages_accelerations").update({ status: "failed", retry_count: row.retry_count + 1, next_retry_at: new Date(Date.now() + Math.min(3600, 60 * 2 ** row.retry_count) * 1000).toISOString(), last_error: String(error).slice(0, 1000), updated_at: new Date().toISOString() }).eq("site_id", row.site_id);
@@ -254,7 +275,10 @@ async function demote(env: Env, row: AccelerationRow, limitFreeTraffic = false) 
   const supabase = createServiceSupabase(env) as any;
   await supabase.from("pages_accelerations").update({ status: "deleting", updated_at: new Date().toISOString() }).eq("site_id", row.site_id);
   try {
-    if (row.bypass_route_id) await cf(env, `/zones/${env.CLOUDFLARE_ZONE_ID}/workers/routes/${row.bypass_route_id}`, { method: "DELETE" });
+    if (row.bypass_route_id) {
+      const zoneId = await zoneIdForHostname(env, row.hostname);
+      await cf(env, `/zones/${zoneId}/workers/routes/${row.bypass_route_id}`, { method: "DELETE" });
+    }
     if (row.pages_project_name) await cf(env, `/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/pages/projects/${row.pages_project_name}`, { method: "DELETE" });
     const nextRetryAt = limitFreeTraffic ? new Date(Date.now() + 30 * 86400_000).toISOString() : null;
     if (limitFreeTraffic) await env.DOMAIN_MAP?.put(`traffic-limit:${row.hostname}`, "free-hot-site", { expirationTtl: 30 * 86400 });

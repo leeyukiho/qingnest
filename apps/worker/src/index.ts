@@ -4,6 +4,7 @@ import { handleSiteRequest } from "./router";
 import type { Env } from "./types";
 import { runTrafficLifecycle } from "./traffic";
 import { evaluateCapacityAlerts } from "./capacity";
+import { syncPlatformDomains } from "./platform-domains";
 
 export default {
   async fetch(
@@ -20,6 +21,6 @@ export default {
     return handleSiteRequest(request, env, context);
   },
   async scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
-    context.waitUntil(Promise.all([runTrafficLifecycle(env), evaluateCapacityAlerts(env)]));
+    context.waitUntil(Promise.all([runTrafficLifecycle(env), evaluateCapacityAlerts(env), syncPlatformDomains(env)]));
   },
 };

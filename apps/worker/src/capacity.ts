@@ -7,10 +7,10 @@ export type ResendPlan = "free" | "pro" | "scale";
 export type CapacityLimits = Record<
   "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "resendEmailsDaily" | "resendEmailsMonthly",
   number
->;
+> & Partial<Record<"cloudflareApiRequests" | "cloudflareApiFailures", number>>;
 export type CapacityThresholds = Record<keyof CapacityLimits, { warningPercent: number; criticalPercent: number }>;
 
-const capacityMetricKeys: Array<keyof CapacityLimits> = ["workerRequests", "kvReads", "kvWrites", "r2StorageBytes", "r2ClassA", "r2ClassB", "pagesDeployments", "pagesProjects", "resendEmailsDaily", "resendEmailsMonthly"];
+const capacityMetricKeys: Array<keyof CapacityLimits> = ["workerRequests", "kvReads", "kvWrites", "r2StorageBytes", "r2ClassA", "r2ClassB", "pagesDeployments", "pagesProjects", "cloudflareApiRequests", "cloudflareApiFailures", "resendEmailsDaily", "resendEmailsMonthly"];
 const thresholds = (warningPercent: number, criticalPercent: number): CapacityThresholds => Object.fromEntries(
   capacityMetricKeys.map((key) => [key, { warningPercent, criticalPercent }]),
 ) as CapacityThresholds;
@@ -21,6 +21,11 @@ export const capacityPresets: Record<CapacityStage, { label: string; limits: Cap
   workers_paid_stable: { label: "$5 稳定期", thresholds: thresholds(70, 90), limits: { workerRequests: 10_000_000, kvReads: 10_000_000, kvWrites: 1_000_000, r2StorageBytes: 10_737_418_240, r2ClassA: 1_000_000, r2ClassB: 10_000_000, pagesDeployments: 500, pagesProjects: 85, resendEmailsDaily: 100, resendEmailsMonthly: 3_000 } },
   pages_pro: { label: "$5 + $25 扩容期", thresholds: thresholds(70, 90), limits: { workerRequests: 10_000_000, kvReads: 10_000_000, kvWrites: 1_000_000, r2StorageBytes: 10_737_418_240, r2ClassA: 1_000_000, r2ClassB: 10_000_000, pagesDeployments: 5_000, pagesProjects: 85, resendEmailsDaily: 100, resendEmailsMonthly: 3_000 } },
 };
+
+for (const preset of Object.values(capacityPresets)) {
+  preset.limits.cloudflareApiRequests = 10_000;
+  preset.limits.cloudflareApiFailures = 100;
+}
 
 export const resendPresets: Record<ResendPlan, { label: string; limits: Pick<CapacityLimits, "resendEmailsDaily" | "resendEmailsMonthly"> }> = {
   free: { label: "Free", limits: { resendEmailsDaily: 100, resendEmailsMonthly: 3_000 } },
@@ -69,7 +74,7 @@ export async function getCapacityDashboard(env: Env, user: AuthenticatedUser) {
     workerRequests: 0, kvReads: 0, kvWrites: 0,
     r2StorageBytes: (storedDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.total_bytes ?? 0), 0),
     r2ClassA: (monthlyDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.file_count ?? 0), 0),
-    r2ClassB: 0, pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: projects, resendEmailsDaily, resendEmailsMonthly,
+    r2ClassB: 0, pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: projects, cloudflareApiRequests: Number(usage?.cloudflare_api_requests ?? 0), cloudflareApiFailures: Number(usage?.cloudflare_api_failures ?? 0), resendEmailsDaily, resendEmailsMonthly,
   };
   const preset = capacityPresets[settings.stage as CapacityStage] ?? capacityPresets.workers_paid;
   const resendPlan = resendPresets[settings.resend_plan as ResendPlan] ? settings.resend_plan as ResendPlan : "free";
@@ -104,7 +109,7 @@ export async function evaluateCapacityAlerts(env: Env) {
     db.from("resend_email_usage_daily").select("usage_date, sent_count").gte("usage_date", monthStart()),
   ]);
   if (!settings) return;
-  const observed: Partial<CapacityLimits> = { r2StorageBytes: (storedDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.total_bytes ?? 0), 0), r2ClassA: (monthlyDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.file_count ?? 0), 0), pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: (acceleration ?? []).filter((item: any) => item.pages_project_name).length, resendEmailsDaily: Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0), resendEmailsMonthly: (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0) };
+  const observed: Partial<CapacityLimits> = { r2StorageBytes: (storedDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.total_bytes ?? 0), 0), r2ClassA: (monthlyDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.file_count ?? 0), 0), pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: (acceleration ?? []).filter((item: any) => item.pages_project_name).length, cloudflareApiRequests: Number(usage?.cloudflare_api_requests ?? 0), cloudflareApiFailures: Number(usage?.cloudflare_api_failures ?? 0), resendEmailsDaily: Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0), resendEmailsMonthly: (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0) };
   const cooldownMs = Number(settings.notification_cooldown_hours) * 3_600_000;
   const resendPlan = resendPresets[settings.resend_plan as ResendPlan] ? settings.resend_plan as ResendPlan : "free";
   const limits = planLimits(settings.stage as CapacityStage, resendPlan);

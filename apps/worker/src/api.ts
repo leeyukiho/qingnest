@@ -35,6 +35,7 @@ import {
   updateAdminDomainPrice,
   createAdminDomainPrice,
   deleteAdminDomainPrice,
+  syncAdminDomainPrice,
   acknowledgeNotification,
   createAdminNotification,
   getAdminNotifications,
@@ -287,6 +288,12 @@ export async function handleApi(request: Request, env: Env) {
       const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
       if (!user) return problem("请先登录", 401);
       return json(await createAdminDomainPrice(env, user, await readJson(request)));
+    }
+    const adminPriceSyncMatch = url.pathname.match(/^\/api\/admin\/domain-pricing\/([^/]+)\/sync$/);
+    if (adminPriceSyncMatch && request.method === "POST") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await syncAdminDomainPrice(env, user, decodeURIComponent(adminPriceSyncMatch[1] ?? "")));
     }
     const adminPriceMatch = url.pathname.match(/^\/api\/admin\/domain-pricing\/([^/]+)$/);
     if (adminPriceMatch && request.method === "PATCH") {

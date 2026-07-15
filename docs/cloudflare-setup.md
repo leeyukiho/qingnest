@@ -103,19 +103,30 @@ Add these as Worker secrets/variables, never as `VITE_*` values:
 CLOUDFLARE_ACCOUNT_ID=<account id>                 # variable
 CLOUDFLARE_ZONE_ID=<zone id for distribution root> # variable
 CLOUDFLARE_API_TOKEN=<scoped token>                # secret
+CLOUDFLARE_WORKER_SCRIPT=<deployed Worker script name> # variable
 ```
 
 Create the token in Cloudflare API Tokens with the minimum permissions:
 
 ```text
 Account > Cloudflare Pages > Edit
+Zone > Zone > Edit
+Zone > DNS > Edit
 Zone > Workers Routes > Edit
 Zone > Analytics > Read
 ```
 
-The token is used only by the Worker Cron lifecycle. It creates/deletes per-site Pages projects,
-uploads assets, reads zone request aggregates, and creates/deletes the temporary hostname bypass
-route. Do not grant `Account > Administrator`, DNS Edit, R2, or User permissions.
+`CLOUDFLARE_WORKER_SCRIPT` is required for automatic platform-domain onboarding. When an
+administrator adds a platform domain, the Worker creates or reuses its zone and returns the
+Cloudflare-assigned nameservers. After the registrar points the domain at those nameservers, the
+scheduled job creates one proxied `*.<domain>` DNS record and one `*.<domain>/*` Worker route.
+User/project bindings only update the existing hostname mapping; they do not create per-user DNS
+records or routes.
+
+The token is used by administrator domain onboarding and the Worker Cron lifecycle. It manages
+platform zones, wildcard DNS records and Worker routes; it also creates/deletes per-site Pages
+projects, uploads assets, reads zone request aggregates, and manages temporary hostname bypass
+routes. Do not grant `Account > Administrator`, R2, or User permissions.
 
 ## Worker Bindings
 
