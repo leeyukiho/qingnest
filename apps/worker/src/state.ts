@@ -111,6 +111,7 @@ export type AccountProfile = {
 
 export type AdminOverview = {
   users: number;
+  todayUsers: number;
   sites: number;
   activeSites: number;
   pendingReviewSites: number;
@@ -759,6 +760,13 @@ export async function signUpWithEmailPassword(
     throw sendError;
   }
 
+  const usageDate = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { error: usageError } = await (serviceSupabase as any).rpc(
+    "record_resend_email_send",
+    { p_usage_date: usageDate },
+  );
+  if (usageError) console.error("Failed to record Resend usage", usageError.message);
+
   return {
     email,
     alreadySent: false,
@@ -994,14 +1002,16 @@ export async function getAdminOverview(
   });
   if (error) throw new Error(error.message);
   if (!data) throw new Error("无法读取管理员数据");
-  const [{ data: domains, error: domainsError }, { data: plans, error: plansError }, { data: pricing, error: pricingError }] = await Promise.all([
+  const chinaToday = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [{ data: domains, error: domainsError }, { data: plans, error: plansError }, { data: pricing, error: pricingError }, { count: todayUsers, error: todayUsersError }] = await Promise.all([
     (supabase as any).from("domains").select("id, user_id, site_id, hostname, type, status, created_at, profiles(email), sites(name)").neq("status", "deleted").order("created_at", { ascending: false }).limit(100),
     supabase.from("plan_catalog").select("*").order("monthly_price_cents"),
     supabase.from("domain_pricing").select("*").order("domain_type"),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).gte("created_at", `${chinaToday}T00:00:00+08:00`),
   ]);
-  if (domainsError || plansError || pricingError) throw new Error((domainsError ?? plansError ?? pricingError)!.message);
-  const base = data as unknown as Omit<AdminOverview, "domainsList" | "plans" | "domainPricing">;
-  return { ...base, domainsList: (domains ?? []).map((domain: any) => ({ id: domain.id, userId: domain.user_id, ownerEmail: domain.profiles?.email ?? "未知用户", siteId: domain.site_id, siteName: domain.sites?.name ?? null, hostname: domain.hostname, type: domain.type, status: domain.status, createdAt: domain.created_at })), plans: plans ?? [], domainPricing: pricing ?? [] };
+  if (domainsError || plansError || pricingError || todayUsersError) throw new Error((domainsError ?? plansError ?? pricingError ?? todayUsersError)!.message);
+  const base = data as unknown as Omit<AdminOverview, "todayUsers" | "domainsList" | "plans" | "domainPricing">;
+  return { ...base, todayUsers: todayUsers ?? 0, domainsList: (domains ?? []).map((domain: any) => ({ id: domain.id, userId: domain.user_id, ownerEmail: domain.profiles?.email ?? "未知用户", siteId: domain.site_id, siteName: domain.sites?.name ?? null, hostname: domain.hostname, type: domain.type, status: domain.status, createdAt: domain.created_at })), plans: plans ?? [], domainPricing: pricing ?? [] };
 }
 
 async function requireAdmin(env: Env, user: AuthenticatedUser) {

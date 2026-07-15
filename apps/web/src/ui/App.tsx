@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { getCurrentAccount, setAccessTokenProvider, subscribeToAccountChanges, type AccountProfile } from "@/lib/api";
+import { clearAdminReadCaches, getCurrentAccount, setAccessTokenProvider, subscribeToAccountChanges, type AccountProfile } from "@/lib/api";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { SiteNavbar } from "@/app/SiteNavbar";
 import { LAST_HOME_PAGE_INDEX } from "@/app/ui";
@@ -196,6 +196,7 @@ export function App() {
     const {
       data: { subscription }
     } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
+      if (currentSession?.user.id !== nextSession?.user.id) clearAdminReadCaches();
       currentSession = nextSession;
       setSession(nextSession);
       if (!nextSession) {

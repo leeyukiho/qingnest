@@ -18,6 +18,13 @@ export function setAccessTokenProvider(
   accessTokenProvider = provider;
 }
 
+export function clearAdminReadCaches() {
+  adminOverviewCache = null;
+  adminOverviewRequest = null;
+  capacityCache = null;
+  capacityRequest = null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await accessTokenProvider?.();
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -179,6 +186,7 @@ export function subscribeToAccountChanges(listener: () => void) {
 
 export type AdminOverview = {
   users: number;
+  todayUsers: number;
   sites: number;
   activeSites: number;
   pendingReviewSites: number;
@@ -199,11 +207,17 @@ export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_
 export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
 export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
 export type AdminNotification = NotificationItem & { recipientEmail: string | null; createdByEmail: string };
-export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects";
-export type CapacityDashboard = { settings: { stage: "workers_paid" | "workers_paid_stable" | "pages_pro"; limits: Record<CapacityMetricKey, number>; warningPercent: number; criticalPercent: number; notificationCooldownHours: number; updatedAt: string }; observed: Record<CapacityMetricKey, number>; acceleratedSites: number; sampledAt: string; scopeNote: string; presets: Record<string, { label: string; limits: Record<CapacityMetricKey, number>; warningPercent: number; criticalPercent: number }> };
+export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "resendEmailsDaily" | "resendEmailsMonthly";
+export type ResendPlan = "free" | "pro" | "scale";
+export type CapacityThresholds = Record<CapacityMetricKey, { warningPercent: number; criticalPercent: number }>;
+export type CapacityDashboard = { settings: { stage: "free" | "workers_paid" | "workers_paid_stable" | "pages_pro"; resendPlan: ResendPlan; limits: Record<CapacityMetricKey, number>; thresholds: CapacityThresholds; notificationCooldownHours: number; updatedAt: string }; observed: Record<CapacityMetricKey, number>; acceleratedSites: number; sampledAt: string; scopeNote: string; presets: Record<string, { label: string; limits: Record<CapacityMetricKey, number>; thresholds: CapacityThresholds }>; resendPresets: Record<ResendPlan, { label: string; limits: Pick<Record<CapacityMetricKey, number>, "resendEmailsDaily" | "resendEmailsMonthly"> }> };
 
-const ADMIN_OVERVIEW_CACHE_MS = 30_000;
+const ADMIN_OVERVIEW_CACHE_MS = 5 * 60_000;
+const CAPACITY_CACHE_MS = 2 * 60 * 60_000;
 let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
+let adminOverviewRequest: Promise<AdminOverview> | null = null;
+let capacityCache: { data: CapacityDashboard; expiresAt: number } | null = null;
+let capacityRequest: Promise<CapacityDashboard> | null = null;
 
 export type SignUpConfirmationResult = {
   email: string;
@@ -235,9 +249,13 @@ export async function getAdminOverview(force = false) {
   if (!force && adminOverviewCache && adminOverviewCache.expiresAt > Date.now()) {
     return adminOverviewCache.data;
   }
-  const data = await request<AdminOverview>("/api/admin/overview");
-  adminOverviewCache = { data, expiresAt: Date.now() + ADMIN_OVERVIEW_CACHE_MS };
-  return data;
+  if (!force && adminOverviewRequest) return adminOverviewRequest;
+  const pending = request<AdminOverview>("/api/admin/overview").then((data) => {
+    adminOverviewCache = { data, expiresAt: Date.now() + ADMIN_OVERVIEW_CACHE_MS };
+    return data;
+  });
+  adminOverviewRequest = pending;
+  try { return await pending; } finally { if (adminOverviewRequest === pending) adminOverviewRequest = null; }
 }
 
 export async function createAdminPrivatePreview(siteId: string) {
@@ -270,8 +288,21 @@ export const getNotifications = () => request<NotificationItem[]>("/api/notifica
 export const acknowledgeNotification = (id: string) => request<{ acknowledgedAt: string }>(`/api/notifications/${encodeURIComponent(id)}/acknowledge`, { method: "POST" });
 export const getAdminNotifications = () => request<AdminNotification[]>("/api/admin/notifications");
 export const createAdminNotification = (input: { title: string; body: string; audience: "all" | "user"; recipient?: string }) => adminMutation<AdminNotification>("/api/admin/notifications", "POST", input);
-export const getAdminCapacity = () => request<CapacityDashboard>("/api/admin/capacity");
-export const updateAdminCapacity = (input: CapacityDashboard["settings"]) => adminMutation<CapacityDashboard>("/api/admin/capacity", "PATCH", input);
+export async function getAdminCapacity(force = false) {
+  if (!force && capacityCache && capacityCache.expiresAt > Date.now()) return capacityCache.data;
+  if (!force && capacityRequest) return capacityRequest;
+  const pending = request<CapacityDashboard>("/api/admin/capacity").then((data) => {
+    capacityCache = { data, expiresAt: Date.now() + CAPACITY_CACHE_MS };
+    return data;
+  });
+  capacityRequest = pending;
+  try { return await pending; } finally { if (capacityRequest === pending) capacityRequest = null; }
+}
+export async function updateAdminCapacity(input: CapacityDashboard["settings"]) {
+  const data = await adminMutation<CapacityDashboard>("/api/admin/capacity", "PATCH", input);
+  capacityCache = { data, expiresAt: Date.now() + CAPACITY_CACHE_MS };
+  return data;
+}
 
 export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "enabled">;
 export const getPlatformDomainCatalog = () => request<PlatformDomainOption[]>("/api/domain-catalog");
