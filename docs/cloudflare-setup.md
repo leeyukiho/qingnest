@@ -95,6 +95,28 @@ RESEND_API_KEY=<resend-api-key>
 
 `SUPABASE_SERVICE_ROLE_KEY` and `RESEND_API_KEY` must only be Worker secrets.
 
+### Automatic Pages acceleration secrets
+
+Add these as Worker secrets/variables, never as `VITE_*` values:
+
+```text
+CLOUDFLARE_ACCOUNT_ID=<account id>                 # variable
+CLOUDFLARE_ZONE_ID=<zone id for distribution root> # variable
+CLOUDFLARE_API_TOKEN=<scoped token>                # secret
+```
+
+Create the token in Cloudflare API Tokens with the minimum permissions:
+
+```text
+Account > Cloudflare Pages > Edit
+Zone > Workers Routes > Edit
+Zone > Analytics > Read
+```
+
+The token is used only by the Worker Cron lifecycle. It creates/deletes per-site Pages projects,
+uploads assets, reads zone request aggregates, and creates/deletes the temporary hostname bypass
+route. Do not grant `Account > Administrator`, DNS Edit, R2, or User permissions.
+
 ## Worker Bindings
 
 R2 bucket binding:
@@ -110,6 +132,13 @@ KV namespace binding:
 Variable name: DOMAIN_MAP
 Namespace:     <kv-namespace-name>
 Namespace ID:  <kv-namespace-id>
+
+Analytics Engine binding:
+
+```text
+Variable name: TRAFFIC_ANALYTICS
+Dataset:       qingnest_traffic
+```
 ```
 
 ## Worker Routes
@@ -124,6 +153,8 @@ app.985201314.xyz/*         -> no Worker / bypass to Pages
 
 The console API route is needed when `VITE_API_BASE_URL` is empty.
 The console bypass route prevents the wildcard user-site route from taking over the Pages console.
+Private preview URLs use `preview.<distribution-root>/preview/<token>/`, so the wildcard
+user route must include that hostname. Keep `preview` reserved from user domain assignments.
 
 ## Rate Limiting
 

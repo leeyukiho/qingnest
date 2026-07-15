@@ -1,4 +1,5 @@
 /app /studio 301
 /profile /studio/profile 301
 /studio/admin /admin 301
+/preview/* https://preview.985201314.xyz/preview/:splat 302
 /* /index.html 200

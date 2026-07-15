@@ -177,16 +177,17 @@ export function App() {
     }
 
     const supabaseClient = supabase;
+    let currentSession: Session | null = null;
 
     setAccessTokenProvider(async () => {
-      const { data } = await supabaseClient.auth.getSession();
-      return data.session?.access_token ?? null;
+      return currentSession?.access_token ?? null;
     });
 
     let active = true;
 
     supabaseClient.auth.getSession().then(({ data }) => {
       if (!active) return;
+      currentSession = data.session;
       setSession(data.session);
       setAuthReady(true);
     });
@@ -194,6 +195,7 @@ export function App() {
     const {
       data: { subscription }
     } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
+      currentSession = nextSession;
       setSession(nextSession);
       if (!nextSession) {
         setAccount(null);

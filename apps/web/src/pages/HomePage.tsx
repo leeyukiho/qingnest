@@ -86,7 +86,7 @@ const pricingPlans = [
   {
     cta: "免费开始",
     description: "适合个人作品、AI 页面和轻量项目。",
-    features: ["注册赠送永久域名", "最多 3 个站点", "单站点 50 MB", "每日 20 次部署"],
+    features: ["注册即可发布", "最多 2 个站点", "100 MB 总存储", "每日 5 次部署", "热门站点 72 小时临时保护"],
     highlighted: false,
     name: "免费计划",
     period: "永久免费",
@@ -95,11 +95,11 @@ const pricingPlans = [
   {
     cta: "升级套餐",
     description: "适合持续发布、更多项目和更高访问量。",
-    features: ["20 个站点", "2 GB 总存储", "单站点 200 MB", "每日 100 次部署", "访问分析与去品牌"],
+    features: ["最多 20 个站点", "5 GB 总存储", "单站点 500 MB", "每日 100 次部署", "1 个热门站点长期加速"],
     highlighted: true,
     name: "付费套餐",
     period: "/月",
-    price: "¥29"
+    price: "¥49"
   }
 ];
 

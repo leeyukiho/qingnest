@@ -171,6 +171,11 @@ const SIGNUP_CONFIRMATION_TTL_SECONDS = 24 * 60 * 60;
 const draftSites = new Map<string, DraftSite>();
 const claimedSubdomains = new Set<string>();
 const memoryUploadSessions = new Map<string, MemoryUploadSession>();
+const domainMappingCache = new Map<
+  string,
+  { value: DomainMapping | null; expiresAt: number }
+>();
+const domainMappingRequests = new Map<string, Promise<DomainMapping | null>>();
 const subdomainAvailabilityCache = new Map<
   string,
   { expiresAt: number; request: Promise<SubdomainAvailability> }
@@ -202,11 +207,57 @@ async function readDomainCache(env: Env, subdomain: string) {
   return env.DOMAIN_MAP.get(subdomain).catch(() => null);
 }
 
+function cacheDomainMapping(hostname: string, value: DomainMapping | null) {
+  const key = hostname.toLowerCase();
+  domainMappingCache.delete(key);
+  domainMappingCache.set(key, {
+    value,
+    expiresAt:
+      Date.now() +
+      (value
+        ? platformConfig.cache.domainMappingTtlMs
+        : platformConfig.cache.domainMappingNegativeTtlMs),
+  });
+
+  while (domainMappingCache.size > platformConfig.cache.domainMappingMaxEntries) {
+    const oldestKey = domainMappingCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    domainMappingCache.delete(oldestKey);
+  }
+}
+
+function readMemoryDomainMapping(hostname: string) {
+  const key = hostname.toLowerCase();
+  const cached = domainMappingCache.get(key);
+
+  if (!cached) return undefined;
+  if (cached.expiresAt <= Date.now()) {
+    domainMappingCache.delete(key);
+    return undefined;
+  }
+
+  // Refresh insertion order so frequently used hostnames survive the size cap.
+  domainMappingCache.delete(key);
+  domainMappingCache.set(key, cached);
+  return cached.value;
+}
+
+function invalidateMemoryDomainMapping(subdomain: string) {
+  const normalized = subdomain.toLowerCase();
+  for (const hostname of domainMappingCache.keys()) {
+    if (hostname === normalized || hostname.split(".")[0] === normalized) {
+      domainMappingCache.delete(hostname);
+    }
+  }
+}
+
 async function writeDomainCache(
   env: Env,
   subdomain: string,
   mapping: DomainMapping,
 ) {
+  cacheDomainMapping(mapping.hostname, mapping);
+
   if (!env.DOMAIN_MAP) {
     return false;
   }
@@ -220,6 +271,7 @@ async function writeDomainCache(
 }
 
 async function deleteDomainCache(env: Env, subdomain: string) {
+  invalidateMemoryDomainMapping(subdomain);
   if (!env.DOMAIN_MAP) return false;
   try {
     await env.DOMAIN_MAP.delete(subdomain);
@@ -1690,6 +1742,16 @@ export async function switchPublicSlot(
   )!;
 }
 
+function getPrivatePreviewUrl(env: Env, origin: string, token: string) {
+  const config = getWorkerPlatformConfig(env);
+  const requestUrl = new URL(origin);
+  const previewOrigin = requestUrl.hostname === config.domains.appHost
+    ? `${config.domains.publicProtocol}://preview.${config.domains.distributionRoot}`
+    : requestUrl.origin;
+
+  return `${previewOrigin}/preview/${token}/`;
+}
+
 export async function createPrivatePreview(
   env: Env,
   input: { siteId: string; user: AuthenticatedUser; origin: string },
@@ -1713,7 +1775,7 @@ export async function createPrivatePreview(
     { expirationTtl: 600 },
   );
   return {
-    url: `${input.origin}/preview/${token}/`,
+    url: getPrivatePreviewUrl(env, input.origin, token),
     expiresAt: new Date(Date.now() + 600_000).toISOString(),
   };
 }
@@ -1732,7 +1794,7 @@ export async function createAdminPrivatePreview(
   if (deploymentError || !deployment) throw new Error("找不到可预览的部署");
   const token = nanoid(32);
   await env.DOMAIN_MAP.put(`preview:${token}`, JSON.stringify({ siteId: input.siteId, deploymentId: deployment.id, r2Prefix: deployment.r2_prefix, spaFallbackEnabled: deployment.spa_fallback_enabled, status: "active" }), { expirationTtl: 600 });
-  return { url: `${input.origin}/preview/${token}/`, expiresAt: new Date(Date.now() + 600_000).toISOString() };
+  return { url: getPrivatePreviewUrl(env, input.origin, token), expiresAt: new Date(Date.now() + 600_000).toISOString() };
 }
 
 export async function createUploadSession(
@@ -2438,7 +2500,7 @@ async function provisionLegacyWelcomeDeployment(
   }
 }
 
-export async function getDomainMapping(env: Env, hostname: string) {
+async function loadDomainMapping(env: Env, hostname: string) {
   const subdomain = hostname.split(".")[0] ?? "";
   const value = await readDomainCache(env, subdomain);
 
@@ -2502,4 +2564,25 @@ export async function getDomainMapping(env: Env, hostname: string) {
 
   await writeDomainCache(env, subdomain, mapping);
   return mapping;
+}
+
+export async function getDomainMapping(env: Env, hostname: string) {
+  const normalizedHostname = hostname.toLowerCase();
+  const cached = readMemoryDomainMapping(normalizedHostname);
+  if (cached !== undefined) return cached;
+
+  const pending = domainMappingRequests.get(normalizedHostname);
+  if (pending) return pending;
+
+  const request = loadDomainMapping(env, normalizedHostname)
+    .then((mapping) => {
+      cacheDomainMapping(normalizedHostname, mapping);
+      return mapping;
+    })
+    .finally(() => {
+      domainMappingRequests.delete(normalizedHostname);
+    });
+
+  domainMappingRequests.set(normalizedHostname, request);
+  return request;
 }

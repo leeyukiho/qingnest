@@ -54,7 +54,21 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
             ) : (
               <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {sortedProjects.map((project) => (
-                  <article className={`${STUDIO_PANEL_CLASS} flex min-h-48 flex-col p-5 ${project.visibility === "public" ? "border-white/45 bg-white/[0.025]" : "border-white/15"}`} key={project.id}>
+                  <article
+                    className={`${STUDIO_PANEL_CLASS} flex min-h-48 cursor-pointer flex-col p-5 transition-colors hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${project.visibility === "public" ? "border-white/45 bg-white/[0.025]" : "border-white/15"}`}
+                    key={project.id}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("a, button, input, select, textarea")) return;
+                      onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}`);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                      event.preventDefault();
+                      onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}`);
+                    }}
+                    role="link"
+                    tabIndex={0}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="truncate text-base font-semibold text-white">{project.name}</h2>

@@ -11,6 +11,10 @@ export type Env = {
   RESEND_FROM_NAME?: string;
   SITE_ASSETS?: R2Bucket;
   DOMAIN_MAP?: KVNamespace;
+  TRAFFIC_ANALYTICS?: AnalyticsEngineDataset;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_ZONE_ID?: string;
+  CLOUDFLARE_API_TOKEN?: string;
 };
 
 export type ApiResponse<T> = {

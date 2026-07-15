@@ -73,6 +73,19 @@ export const platformConfigSchema = z.object({
     manualReviewRiskScore: z.number().int().positive(),
     rateLimitWindowSeconds: z.number().int().positive()
   }),
+  trafficAcceleration: z.object({
+    evaluationWindowMinutes: z.number().int().positive(),
+    promoteRequestsInWindow: z.number().int().positive(),
+    promoteConsecutiveWindows: z.number().int().positive(),
+    cooldownRequestsInWindow: z.number().int().nonnegative(),
+    cooldownConsecutiveWindows: z.number().int().positive(),
+    freeProtectionHours: z.number().int().positive(),
+    paidProtectionHours: z.number().int().positive(),
+    maxPagesProjects: z.number().int().positive(),
+    maxDirectUploadBytes: z.number().int().positive(),
+    maxPagesFileBytes: z.number().int().positive(),
+    maxPagesFiles: z.number().int().positive()
+  }),
   deployment: z.object({
     acceptedArchiveExtensions: z.array(z.string()),
     entrypoints: z.array(z.string()),
@@ -94,7 +107,12 @@ export const platformConfigSchema = z.object({
   cache: z.object({
     html: z.string(),
     assetsWithHash: z.string(),
-    assetsDefault: z.string()
+    assetsDefault: z.string(),
+    edgeTtlSeconds: z.number().int().positive(),
+    edgeNegativeTtlSeconds: z.number().int().positive(),
+    domainMappingTtlMs: z.number().int().positive(),
+    domainMappingNegativeTtlMs: z.number().int().positive(),
+    domainMappingMaxEntries: z.number().int().positive()
   }),
   securityHeaders: z.record(z.string())
 });

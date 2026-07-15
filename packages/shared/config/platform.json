@@ -28,6 +28,7 @@
       "sso",
       "account",
       "profile",
+      "preview",
       "billing",
       "checkout",
       "cdn",
@@ -142,15 +143,15 @@
       },
       "quotas": {
         "user": {
-          "maxSites": 3,
+          "maxSites": 2,
           "maxPublicSites": 1,
-          "maxStorageBytes": 157286400,
-          "maxDeploymentsPerDay": 20,
-          "maxUploadSessionsPerHour": 10
+          "maxStorageBytes": 104857600,
+          "maxDeploymentsPerDay": 5,
+          "maxUploadSessionsPerHour": 5
         },
         "site": {
           "maxSiteBytes": 52428800,
-          "maxRetainedDeployments": 3,
+          "maxRetainedDeployments": 2,
           "maxDomainsPerSite": 1
         },
         "deployment": {
@@ -185,19 +186,19 @@
       },
       "quotas": {
         "user": {
-          "maxSites": 20,
+          "maxSites": 5,
           "maxPublicSites": 3,
-          "maxStorageBytes": 2147483648,
-          "maxDeploymentsPerDay": 100,
-          "maxUploadSessionsPerHour": 50
+          "maxStorageBytes": 524288000,
+          "maxDeploymentsPerDay": 20,
+          "maxUploadSessionsPerHour": 20
         },
         "site": {
-          "maxSiteBytes": 209715200,
-          "maxRetainedDeployments": 20,
+          "maxSiteBytes": 104857600,
+          "maxRetainedDeployments": 5,
           "maxDomainsPerSite": 1
         },
         "deployment": {
-          "maxArchiveBytes": 209715200,
+          "maxArchiveBytes": 104857600,
           "maxFileBytes": 52428800,
           "maxFiles": 3000,
           "maxPathLength": 240,
@@ -228,19 +229,19 @@
       },
       "quotas": {
         "user": {
-          "maxSites": 100,
+          "maxSites": 20,
           "maxPublicSites": 10,
-          "maxStorageBytes": 21474836480,
-          "maxDeploymentsPerDay": 500,
-          "maxUploadSessionsPerHour": 200
+          "maxStorageBytes": 5368709120,
+          "maxDeploymentsPerDay": 100,
+          "maxUploadSessionsPerHour": 100
         },
         "site": {
-          "maxSiteBytes": 1073741824,
-          "maxRetainedDeployments": 100,
+          "maxSiteBytes": 524288000,
+          "maxRetainedDeployments": 15,
           "maxDomainsPerSite": 5
         },
         "deployment": {
-          "maxArchiveBytes": 1073741824,
+          "maxArchiveBytes": 524288000,
           "maxFileBytes": 104857600,
           "maxFiles": 10000,
           "maxPathLength": 240,
@@ -260,6 +261,49 @@
         "rollback": true,
         "sourceBuild": true
       }
+    },
+    "business": {
+      "label": "商务版",
+      "enabled": true,
+      "requirements": {
+        "requireEmailVerified": true,
+        "requireTurnstile": false,
+        "manualReviewOnHighRisk": true
+      },
+      "quotas": {
+        "user": {
+          "maxSites": 50,
+          "maxPublicSites": 30,
+          "maxStorageBytes": 21474836480,
+          "maxDeploymentsPerDay": 300,
+          "maxUploadSessionsPerHour": 200
+        },
+        "site": {
+          "maxSiteBytes": 1073741824,
+          "maxRetainedDeployments": 30,
+          "maxDomainsPerSite": 20
+        },
+        "deployment": {
+          "maxArchiveBytes": 1073741824,
+          "maxFileBytes": 104857600,
+          "maxFiles": 10000,
+          "maxPathLength": 240,
+          "uploadSessionTtlMinutes": 120
+        },
+        "traffic": {
+          "maxRequestsPerMinute": 6000,
+          "maxRequestsPerDay": 3000000,
+          "maxBandwidthBytesPerMonth": 536870912000
+        }
+      },
+      "capabilities": {
+        "customDomain": true,
+        "passwordProtection": true,
+        "accessAnalytics": true,
+        "removeBranding": true,
+        "rollback": true,
+        "sourceBuild": true
+      }
     }
   },
   "abuseControls": {
@@ -269,6 +313,19 @@
     "autoBlockRiskScore": 90,
     "manualReviewRiskScore": 45,
     "rateLimitWindowSeconds": 60
+  },
+  "trafficAcceleration": {
+    "evaluationWindowMinutes": 15,
+    "promoteRequestsInWindow": 15000,
+    "promoteConsecutiveWindows": 2,
+    "cooldownRequestsInWindow": 1500,
+    "cooldownConsecutiveWindows": 96,
+    "freeProtectionHours": 72,
+    "paidProtectionHours": 168,
+    "maxPagesProjects": 85,
+    "maxDirectUploadBytes": 94371840,
+    "maxPagesFileBytes": 26214400,
+    "maxPagesFiles": 20000
   },
   "deployment": {
     "acceptedArchiveExtensions": [".zip"],
@@ -334,7 +391,12 @@
   "cache": {
     "html": "no-cache",
     "assetsWithHash": "public, max-age=31536000, immutable",
-    "assetsDefault": "public, max-age=3600"
+    "assetsDefault": "public, max-age=3600",
+    "edgeTtlSeconds": 60,
+    "edgeNegativeTtlSeconds": 15,
+    "domainMappingTtlMs": 60000,
+    "domainMappingNegativeTtlMs": 15000,
+    "domainMappingMaxEntries": 2000
   },
   "securityHeaders": {
     "X-Content-Type-Options": "nosniff",
