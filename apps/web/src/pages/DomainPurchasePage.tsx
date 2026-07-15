@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   CircleAlert,
@@ -28,6 +28,7 @@ import {
 } from "@/lib/api";
 import { clientPlatformConfig } from "@/lib/platform";
 import { validateSubdomain } from "@qingnest/shared/config/platform";
+import { displayHostname } from "@qingnest/shared/config/domain";
 
 const domainRoot = clientPlatformConfig.domains.distributionRoot;
 
@@ -45,6 +46,8 @@ export function DomainPurchasePage({
   const [purchasing, setPurchasing] = useState(false);
   const [domainOptions, setDomainOptions] = useState<PlatformDomainOption[]>([]);
   const [selectedSuffix, setSelectedSuffix] = useState(domainRoot);
+  const [domainQuery, setDomainQuery] = useState("");
+  const [suffixFilter, setSuffixFilter] = useState("all");
   useEffect(() => {
     void getPlatformDomainCatalog().then((items) => {
       if (!items.length) return;
@@ -55,6 +58,18 @@ export function DomainPurchasePage({
   const localValidation = prefix.trim()
     ? validateSubdomain(prefix)
     : null;
+  const availableOptions = domainOptions.length
+    ? domainOptions
+    : [{ domain_type: "platform_subdomain", label: domainRoot, hostname_suffix: domainRoot, price_cents: 990, billing_period: "year" as const, enabled: true }];
+  const suffixes = useMemo(
+    () => Array.from(new Set(availableOptions.map((option) => displayHostname(option.hostname_suffix).split(".").at(-1) ?? ""))).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
+    [domainOptions],
+  );
+  const filteredOptions = availableOptions.filter((option) => {
+    const display = displayHostname(option.hostname_suffix);
+    const query = domainQuery.trim().toLocaleLowerCase();
+    return (!query || display.toLocaleLowerCase().includes(query) || option.hostname_suffix.toLowerCase().includes(query)) && (suffixFilter === "all" || display.split(".").at(-1) === suffixFilter);
+  });
 
   const handleCheck = async () => {
     const value = prefix.trim().toLowerCase();
@@ -135,12 +150,23 @@ export function DomainPurchasePage({
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                  {(domainOptions.length ? domainOptions : [{ domain_type: "platform_subdomain", label: domainRoot, hostname_suffix: domainRoot, price_cents: 990, billing_period: "year" as const, enabled: true }]).map((option) => {
-                    const selected = selectedSuffix === option.hostname_suffix;
-                    return <button aria-pressed={selected} className={`flex min-h-20 cursor-pointer items-center justify-between rounded-md border p-4 text-left transition-colors ${selected ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.domain_type} onClick={() => { setSelectedSuffix(option.hostname_suffix); setCheck(null); }} type="button"><span><span className="block text-sm font-semibold text-zinc-100">{option.hostname_suffix}</span><span className="mt-1 block text-xs text-zinc-500">¥{(option.price_cents / 100).toFixed(2)} / {option.billing_period === "month" ? "月" : option.billing_period === "year" ? "年" : "一次性"}</span></span>{selected ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : null}</button>;
-                  })}
+                <div className="mt-6 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                  <label className="flex h-10 items-center gap-2 rounded-md border border-white/15 px-3 focus-within:border-white/35">
+                    <Search className="h-4 w-4 shrink-0 text-zinc-500" />
+                    <span className="sr-only">搜索平台域名</span>
+                    <input className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-700" onChange={(event) => setDomainQuery(event.target.value)} placeholder="搜索域名" value={domainQuery} />
+                  </label>
+                  <select aria-label="筛选域名后缀" className="h-10 cursor-pointer rounded-md border border-white/15 bg-black px-3 text-sm text-zinc-200 outline-none focus:border-white/35" onChange={(event) => setSuffixFilter(event.target.value)} value={suffixFilter}>
+                    <option value="all">全部后缀</option>
+                    {suffixes.map((suffix) => <option key={suffix} value={suffix}>.{suffix}</option>)}
+                  </select>
                 </div>
+                {filteredOptions.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {filteredOptions.map((option) => {
+                    const selected = selectedSuffix === option.hostname_suffix;
+                    return <button aria-pressed={selected} className={`flex min-h-20 cursor-pointer items-center justify-between rounded-md border p-4 text-left transition-colors ${selected ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.domain_type} onClick={() => { setSelectedSuffix(option.hostname_suffix); setCheck(null); }} type="button"><span><span className="block text-sm font-semibold text-zinc-100">{displayHostname(option.hostname_suffix)}</span><span className="mt-1 block text-xs text-zinc-500">¥{(option.price_cents / 100).toFixed(2)} / {option.billing_period === "month" ? "月" : option.billing_period === "year" ? "年" : "一次性"}</span></span>{selected ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : null}</button>;
+                  })}
+                </div> : <div className="mt-3 rounded-md border border-dashed border-white/15 px-4 py-8 text-center text-sm text-zinc-500">没有符合条件的平台域名</div>}
 
                 <div className="mt-6">
                   <label className="text-sm font-medium text-zinc-200" htmlFor="domain-prefix">
@@ -176,7 +202,7 @@ export function DomainPurchasePage({
                       value={prefix}
                     />
                     <span className="flex shrink-0 items-center border-l border-white/10 bg-white/[0.03] px-3 text-sm text-zinc-500">
-                      .{selectedSuffix}
+                      .{displayHostname(selectedSuffix)}
                     </span>
                   </div>
 
@@ -190,7 +216,7 @@ export function DomainPurchasePage({
                         <p className={`flex items-center gap-2 text-sm ${check.available ? "text-emerald-400" : "text-red-400"}`}>
                           {check.available ? <CheckCircle2 className="h-4 w-4" /> : <CircleAlert className="h-4 w-4" />}
                           {check.available
-                            ? `${check.normalized}.${selectedSuffix} 可以使用`
+                            ? `${check.normalized}.${displayHostname(selectedSuffix)} 可以使用`
                             : check.reason ?? "该地址不可用"}
                         </p>
                       ) : (
@@ -214,7 +240,7 @@ export function DomainPurchasePage({
                 <ShoppingBag className="h-5 w-5 text-zinc-400" />
                 <h2 className="mt-3 text-sm font-semibold">确认地址</h2>
                 <p className="mt-2 break-all text-sm font-medium text-zinc-200">
-                  {prefix.trim() ? `${prefix.trim()}.${selectedSuffix}` : `你的前缀.${selectedSuffix}`}
+                  {prefix.trim() ? `${prefix.trim()}.${displayHostname(selectedSuffix)}` : `你的前缀.${displayHostname(selectedSuffix)}`}
                 </p>
                 <p className="mt-3 text-sm leading-6 text-zinc-500">
                   当前未接入在线支付，本次确认不会扣款。地址会先保留在账户中，之后可绑定项目。

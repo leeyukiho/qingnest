@@ -102,6 +102,7 @@ export type AccountProfile = {
   emailConfirmed: boolean;
   role: ProfileRole;
   plan: string;
+  planConfig: ReturnType<typeof getPlanConfig>;
   createdAt: string;
   usage: {
     sites: number;
@@ -1004,6 +1005,7 @@ export async function getAccountProfile(
     emailConfirmed: user.emailConfirmed,
     role: data.role,
     plan: data.plan,
+    planConfig: await getEffectivePlanConfig(env, data.plan),
     createdAt: data.created_at,
     usage: {
       sites: sites?.length ?? 0,
@@ -1118,7 +1120,7 @@ async function getEffectivePlanConfig(env: Env, planKey: string | null | undefin
     enabled: data.enabled,
     quotas: {
       ...fallback.quotas,
-      user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day },
+      user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day, maxUploadSessionsPerHour: data.max_upload_sessions_per_hour },
       site: { ...fallback.quotas.site, maxDomainsPerSite: data.max_domains_per_site },
       deployment: { ...fallback.quotas.deployment, maxFiles: data.max_files },
     },
@@ -1767,15 +1769,6 @@ export async function rentPublicSlot(
     throw new Error(availability.reason ?? "公开地址不可用");
 
   const supabase = createServiceSupabase(env);
-  const { count, error: countError } = await supabase
-    .from("domains")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", input.user.id)
-    .neq("status", "deleted");
-  if (countError) throw new Error(countError.message);
-  if ((count ?? 0) >= 10)
-    throw new Error("每个账户最多可保留 10 个平台地址");
-
   const { data: domain, error } = await supabase
     .from("domains")
     .insert({
@@ -1940,6 +1933,15 @@ export async function createUploadSession(
 
     assertEmailConfirmed(input.user);
     await ensureProfile(env, input.user);
+    const plan = await getEffectivePlanConfig(
+      env,
+      await getUserPlan(env, input.user),
+    );
+    if (input.scan.fileCount > plan.quotas.deployment.maxFiles) {
+      throw new Error(
+        `当前套餐单次最多发布 ${plan.quotas.deployment.maxFiles} 个文件`,
+      );
+    }
     await assertUploadSessionQuota(env, input.user);
     await assertStorageQuota(
       env,

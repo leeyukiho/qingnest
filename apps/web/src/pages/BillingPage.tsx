@@ -5,6 +5,8 @@ import {
   FolderKanban,
   Globe2,
   Layers3,
+  Rocket,
+  UploadCloud,
 } from "lucide-react";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
@@ -27,7 +29,7 @@ export function BillingPage({
   account: AccountProfile | null;
   onNavigate: (path: string) => void;
 }) {
-  const plan = getPlanConfig(account?.plan);
+  const plan = account?.planConfig ?? getPlanConfig(account?.plan);
   const usage = account?.usage;
   const items = [
     [FolderKanban, "项目", usage?.sites ?? 0, plan.quotas.user.maxSites],
@@ -43,6 +45,32 @@ export function BillingPage({
       formatBytes(usage?.storageBytes ?? 0),
       formatBytes(plan.quotas.user.maxStorageBytes),
     ],
+  ] as const;
+  const benefits = [
+    {
+      icon: FolderKanban,
+      title: "项目空间",
+      value: `${plan.quotas.user.maxSites} 个项目`,
+      description: `同时公开 ${plan.quotas.user.maxPublicSites} 个站点，从作品展示到业务官网都能集中管理。`,
+    },
+    {
+      icon: Database,
+      title: "托管存储",
+      value: formatBytes(plan.quotas.user.maxStorageBytes),
+      description: "平台负责存放网站当前线上版本，发布时会校验账户剩余空间。",
+    },
+    {
+      icon: Rocket,
+      title: "快速发布",
+      value: `${plan.quotas.user.maxDeploymentsPerDay} 次 / 天`,
+      description: "上传 ZIP 或文件夹即可更新网站，免服务器配置，把时间留给内容和业务。",
+    },
+    {
+      icon: UploadCloud,
+      title: "上传频次",
+      value: `${plan.quotas.user.maxUploadSessionsPerHour} 次 / 小时`,
+      description: "为频繁更新留出充足空间，达到上限后下一小时自动恢复。",
+    },
   ] as const;
   return (
     <div className="min-h-dvh bg-black">
@@ -71,9 +99,7 @@ export function BillingPage({
                   <div>
                     <p className="text-xs text-zinc-500">当前资源套餐</p>
                     <h2 className="mt-1 text-lg font-semibold">{plan.label}</h2>
-                    <p className="mt-2 text-sm leading-6 text-zinc-500">
-                      决定项目数量、公开站点、存储与部署额度。
-                    </p>
+                    <p className="mt-2 whitespace-nowrap text-sm text-zinc-500">掌握项目、站点和存储用量。</p>
                   </div>
                 </div>
                 <div className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -90,9 +116,11 @@ export function BillingPage({
                     </div>
                   ))}
                 </div>
-                <p className="mt-auto border-t border-white/10 pt-5 text-xs text-zinc-600">
-                  套餐升级与账单支付接口尚未接入。
-                </p>
+                <p className="mt-auto border-t border-white/10 pt-5 text-xs text-zinc-600">在线升级和付款正在接入，目前不会自动扣费。</p>
+                <button className="mt-3 inline-flex h-9 w-fit items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-zinc-300" onClick={() => onNavigate("/#pricing")} type="button">
+                  查看其他收费计划
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               </section>
               <section
                 className={`${STUDIO_PANEL_CLASS} flex min-h-72 flex-col p-5 sm:p-6`}
@@ -102,23 +130,26 @@ export function BillingPage({
                   <div>
                     <p className="text-xs text-zinc-500">独立服务</p>
                     <h2 className="mt-1 text-lg font-semibold">可租赁域名</h2>
-                    <p className="mt-2 text-sm leading-6 text-zinc-500">
-                      从平台提供的多个域名后缀中选择地址。每个地址独立租赁，可在你的项目之间换绑，不受资源套餐变更影响。
-                    </p>
+                    <p className="mt-2 whitespace-nowrap text-sm text-zinc-500">为网站选择更好记的公开地址。</p>
                   </div>
                 </div>
-                <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10">
+                <div className="mt-6 grid grid-cols-3 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10">
                   <div className="bg-black p-4">
-                    <p className="text-xs text-zinc-500">可选范围</p>
-                    <p className="mt-2 text-sm font-medium">多个平台域名</p>
+                    <p className="text-xs text-zinc-500">地址选择</p>
+                    <p className="mt-2 text-sm font-medium">多个后缀</p>
                   </div>
                   <div className="bg-black p-4">
-                    <p className="text-xs text-zinc-500">绑定方式</p>
-                    <p className="mt-2 text-sm font-medium">每次绑定一个项目</p>
+                    <p className="text-xs text-zinc-500">项目管理</p>
+                    <p className="mt-2 text-sm font-medium">支持换绑</p>
+                  </div>
+                  <div className="bg-black p-4">
+                    <p className="text-xs text-zinc-500">计费方式</p>
+                    <p className="mt-2 text-sm font-medium">独立购买</p>
                   </div>
                 </div>
+                <p className="mt-auto border-t border-white/10 pt-5 text-xs text-zinc-600">域名与资源套餐分开计费，套餐变更不影响已租地址。</p>
                 <button
-                  className="mt-auto inline-flex h-10 w-fit items-center gap-2 pt-5 text-sm font-semibold text-white hover:text-zinc-300"
+                  className="mt-3 inline-flex h-9 w-fit items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-zinc-300"
                   onClick={() => onNavigate(STUDIO_DOMAIN_PURCHASE_PATH)}
                   type="button"
                 >
@@ -127,6 +158,22 @@ export function BillingPage({
                 </button>
               </section>
             </div>
+            <section className={`${STUDIO_PANEL_CLASS} mt-5 p-5 sm:p-6`}>
+              <p className="text-xs text-zinc-500">当前等级</p>
+              <h2 className="mt-1 text-base font-semibold">{plan.label}完整权益</h2>
+              <p className="mt-2 text-sm text-zinc-500">从上传到公开访问，平台替你处理托管和分发，让网站更快上线。</p>
+              <dl className="mt-5 grid gap-x-10 sm:grid-cols-2">
+                {benefits.map(({ description, icon: Icon, title, value }) => (
+                  <div className="grid min-h-28 grid-cols-[minmax(0,1fr)_auto] gap-x-4 border-b border-white/10 py-4" key={title}>
+                    <dt className="min-w-0">
+                      <span className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Icon className="h-4 w-4 shrink-0 text-emerald-400" />{title}</span>
+                      <span className="mt-2 block text-xs leading-5 text-zinc-500">{description}</span>
+                    </dt>
+                    <dd className="whitespace-nowrap text-right text-sm font-semibold tabular-nums text-zinc-100">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
           </div>
         </div>
       </section>

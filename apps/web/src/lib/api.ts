@@ -129,6 +129,7 @@ export type AccountProfile = {
   emailConfirmed: boolean;
   role: AccountRole;
   plan: string;
+  planConfig?: ReturnType<typeof import("@qingnest/shared/config/platform").getPlanConfig>;
   createdAt: string;
   usage: {
     sites: number;
@@ -203,11 +204,11 @@ export type AdminOverview = {
   domainPricing: AdminDomainPrice[];
 };
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
-export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
+export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour: number; max_domains_per_site: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
 export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
 export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
 export type AdminNotification = NotificationItem & { recipientEmail: string | null; createdByEmail: string };
-export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "cloudflareApiRequests" | "cloudflareApiFailures" | "resendEmailsDaily" | "resendEmailsMonthly";
+export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "resendEmailsDaily" | "resendEmailsMonthly";
 export type ResendPlan = "free" | "pro" | "scale";
 export type CapacityThresholds = Record<CapacityMetricKey, { warningPercent: number; criticalPercent: number }>;
 export type CapacityDashboard = { settings: { stage: "free" | "workers_paid" | "workers_paid_stable" | "pages_pro"; resendPlan: ResendPlan; limits: Record<CapacityMetricKey, number>; thresholds: CapacityThresholds; notificationCooldownHours: number; updatedAt: string }; observed: Record<CapacityMetricKey, number>; acceleratedSites: number; sampledAt: string; scopeNote: string; presets: Record<string, { label: string; limits: Record<CapacityMetricKey, number>; thresholds: CapacityThresholds }>; resendPresets: Record<ResendPlan, { label: string; limits: Pick<Record<CapacityMetricKey, number>, "resendEmailsDaily" | "resendEmailsMonthly"> }> };
@@ -306,7 +307,14 @@ export async function updateAdminCapacity(input: CapacityDashboard["settings"]) 
 }
 
 export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "enabled">;
-export const getPlatformDomainCatalog = () => request<PlatformDomainOption[]>("/api/domain-catalog");
+let platformDomainCatalogRequest: Promise<PlatformDomainOption[]> | null = null;
+export const getPlatformDomainCatalog = () => {
+  platformDomainCatalogRequest ??= request<PlatformDomainOption[]>("/api/domain-catalog");
+  platformDomainCatalogRequest.catch(() => {
+    platformDomainCatalogRequest = null;
+  });
+  return platformDomainCatalogRequest;
+};
 
 export async function checkSubdomain(subdomain: string, hostnameSuffix?: string) {
   const normalized = subdomain.trim().toLowerCase();

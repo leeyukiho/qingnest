@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { normalizeHostname, platformDomainType } from "@qingnest/shared/config/domain";
-import { Activity, Ban, Bell, CircleDollarSign, Crown, ExternalLink, FolderKanban, Gauge, Globe2, LayoutDashboard, Loader2, Lock, Plus, RefreshCw, RotateCcw, Save, Search, Send, ServerCog, ShieldAlert, Trash2, Users, WalletCards, X } from "lucide-react";
+import { Activity, Ban, Bell, Check, CircleDollarSign, Copy, Crown, ExternalLink, FolderKanban, Gauge, Globe2, LayoutDashboard, Loader2, Lock, Plus, RefreshCw, RotateCcw, Save, Search, Send, ServerCog, ShieldAlert, Trash2, Users, WalletCards, X } from "lucide-react";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { RouteMessage, StudioLoading } from "@/app/feedback";
 import { STUDIO_PATH } from "@/app/navigation";
@@ -347,7 +347,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
             {overview && tab === "domains" ? <DomainsPanel data={overview} domainForm={domainForm} priceDrafts={priceDrafts} setDomainForm={setDomainForm} setPriceDrafts={setPriceDrafts} usersById={usersById} confirm={confirm} changeStatus={changeStatus} /> : null}
             {overview && tab === "plans" ? <PlansPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
             {overview && tab === "benefits" ? <BenefitsPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
-            {overview && tab === "notifications" ? <NotificationsPanel /> : null}
+            {overview && tab === "notifications" ? <NotificationsPanel users={overview.recentUsers} /> : null}
             {overview && tab === "reviews" ? (
               <DataTable headers={["项目 / 版本", "风险", "文件", "体积", "提交时间"]}>
                 {overview.reviewDeployments.map((item) => (
@@ -427,18 +427,6 @@ const capacityMetricMeta = {
     measured: true,
   },
 } as Record<CapacityMetricKey, { label: string; unit: string; measured: boolean }>;
-Object.assign(capacityMetricMeta, {
-  cloudflareApiRequests: {
-    label: "Cloudflare API 请求",
-    unit: "次/月",
-    measured: true,
-  },
-  cloudflareApiFailures: {
-    label: "Cloudflare API 失败",
-    unit: "次/月",
-    measured: true,
-  },
-});
 const compactNumber = (value: number) =>
   new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 1,
@@ -525,21 +513,25 @@ function CapacityPanel() {
   };
   return (
     <section className="mt-5">
-      <div className="flex flex-col gap-4 border-b border-white/15 pb-5 lg:flex-row lg:items-end lg:justify-between">
-        <SectionHeading title="基础设施容量与预警" description="仅管理员可见。容量数据缓存 2 小时，只有缓存过期或主动刷新才重新读取；修改草稿会立即重算比例，保存时仅写入一次。" />
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(data.presets).map(([key, preset]) => (
-            <button className={cn(quietButton, draft.stage === key && "bg-white/10 text-white")} key={key} onClick={() => applyPreset(key)} type="button">
-              {preset.label}
-            </button>
-          ))}
-          <button className={saveButton} disabled={saving} onClick={() => void save()} type="button">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            保存设置
-          </button>
-          <button aria-label="刷新容量状态" className={quietButton} disabled={loading} onClick={() => void load(true)} title="忽略 2 小时缓存并立即刷新" type="button">
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          </button>
+      <div className="overflow-x-auto border-b border-white/15 pb-5">
+        <div className="flex items-end justify-between gap-4">
+          <SectionHeading title="基础设施容量与预警" description="容量数据缓存 2 小时，可手动刷新。" />
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+            {Object.entries(data.presets).map(([key, preset]) => (
+              <button className={cn(quietButton, draft.stage === key && "bg-white/10 text-white")} key={key} onClick={() => applyPreset(key)} type="button">
+                {preset.label}
+              </button>
+            ))}
+            <div className="flex shrink-0 items-center gap-1">
+              <button className={saveButton} disabled={saving} onClick={() => void save()} type="button">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                保存设置
+              </button>
+              <button aria-label="刷新容量状态" className={quietButton} disabled={loading} onClick={() => void load(true)} title="忽略 2 小时缓存并立即刷新" type="button">
+                <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <ToastMessage message={error} />
@@ -656,7 +648,7 @@ function CapacityPanel() {
   );
 }
 
-function NotificationsPanel() {
+function NotificationsPanel({ users }: { users: AdminOverview["recentUsers"] }) {
   const [items, setItems] = useState<AdminNotification[]>([]);
   const [audience, setAudience] = useState<"all" | "user">("all");
   const [recipient, setRecipient] = useState("");
@@ -708,10 +700,10 @@ function NotificationsPanel() {
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           {audience === "user" ? (
-            <label className="grid gap-1 text-xs text-zinc-500 lg:col-span-2">
-              用户邮箱或 ID
-              <ClearableInput aria-label="用户邮箱或 ID" onChange={(event) => setRecipient(event.target.value)} placeholder="user@example.com" value={recipient} />
-            </label>
+            <div className="grid gap-1 text-xs text-zinc-500 lg:col-span-2">
+              <span>用户邮箱或 ID</span>
+              <UserCombobox ariaLabel="搜索并选择通知接收用户" name="notification-recipient-search" onChange={setRecipient} placeholder="" users={users} value={recipient} />
+            </div>
           ) : null}
           <label className="grid gap-1 text-xs text-zinc-500 lg:col-span-2">
             标题
@@ -894,15 +886,8 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
     ["max_public_sites", "公开项目", String, Number],
     ["max_storage_bytes", "存储空间（MB）", (v) => String(Math.round(v / 1024 / 1024)), (v) => Number(v) * 1024 * 1024],
     ["max_deployments_per_day", "每日部署", String, Number],
-    ["max_domains_per_site", "单项目域名", String, Number],
+    ["max_upload_sessions_per_hour", "每小时上传", String, Number],
     ["max_files", "单次部署文件数", String, Number],
-  ];
-  const capabilities: Array<[keyof AdminPlan, string]> = [
-    ["password_protection", "密码保护"],
-    ["access_analytics", "访问统计"],
-    ["remove_branding", "移除品牌"],
-    ["rollback", "版本回滚"],
-    ["source_build", "源码构建"],
   ];
   const [values, setValues] = useState(() => Object.fromEntries(plans.flatMap((plan) => quotas.map(([key, , format]) => [`${plan.key}.${key}`, format(plan[key] as number)]))));
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -918,7 +903,7 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
     const numeric = Object.fromEntries(quotas.map(([key, , , parse]) => [key, parse(values[`${plan.key}.${key}`])]));
     confirm({
       title: "保存等级权益",
-      description: `保存“${draft.label}”的资源配额和功能权益。`,
+      description: `保存“${draft.label}”在服务端实际执行的资源配额。`,
       run: () =>
         updateAdminPlan(plan.key, {
           ...draft,
@@ -929,7 +914,7 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
   }
   return (
     <section className="mt-5">
-      <SectionHeading title="等级权益" description="按等级横向对照资源配额和功能。平台暂不开放用户自有域名接入。" />
+      <SectionHeading title="等级权益" description="这里只分配服务端实际执行的资源配额，保存后会同步影响用户展示和请求校验。" />
       <div className="mt-4 overflow-x-auto border-y border-white/15">
         <table className="w-full min-w-[760px] text-sm">
           <thead>
@@ -963,28 +948,6 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
                         value={values[id]}
                       />
                       <FieldError message={errors[id]} />
-                    </Cell>
-                  );
-                })}
-              </tr>
-            ))}
-            {capabilities.map(([key, label]) => (
-              <tr className="border-b border-white/10" key={key}>
-                <Cell>{label}</Cell>
-                {plans.map((plan) => {
-                  const draft = drafts[plan.key] ?? plan;
-                  return (
-                    <Cell key={plan.key}>
-                      <Toggle
-                        checked={draft[key] as boolean}
-                        label={draft[key] ? "包含" : "不包含"}
-                        onChange={(checked) =>
-                          setDrafts((all) => ({
-                            ...all,
-                            [plan.key]: { ...draft, [key]: checked },
-                          }))
-                        }
-                      />
                     </Cell>
                   );
                 })}
@@ -1184,7 +1147,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                             },
                           }))
                         }
-                        value={draft.hostname_suffix}
+                        value={draft.label || draft.hostname_suffix}
                       />
                       <FieldError />
                     </Cell>
@@ -1446,7 +1409,7 @@ function DomainSuffixCombobox({ onChange, onFilterChange, options, value }: { on
           }}
           onFocus={() => setOpen(true)}
           placeholder="搜索域名后缀"
-          value={selected && !open ? selected.hostname_suffix : query}
+          value={selected && !open ? selected.label || selected.hostname_suffix : query}
         />
         {value || query ? (
           <button
@@ -1480,7 +1443,7 @@ function DomainSuffixCombobox({ onChange, onFilterChange, options, value }: { on
                 }}
                 type="button"
               >
-                <span className="truncate">{option.hostname_suffix}</span>
+                <span className="truncate">{option.label || option.hostname_suffix}</span>
                 <span className="shrink-0 text-xs text-zinc-500">
                   {money(option.price_cents)} / {option.billing_period === "month" ? "月" : option.billing_period === "year" ? "年" : "一次性"}
                 </span>
@@ -1494,7 +1457,7 @@ function DomainSuffixCombobox({ onChange, onFilterChange, options, value }: { on
     </div>
   );
 }
-function UserCombobox({ onChange, users, value }: { onChange: (userId: string) => void; users: AdminOverview["recentUsers"]; value: string }) {
+function UserCombobox({ ariaLabel = "搜索并选择域名所有者", name = "platform-domain-owner-search", onChange, placeholder = "搜索用户邮箱或 ID", users, value }: { ariaLabel?: string; name?: string; onChange: (userId: string) => void; placeholder?: string; users: AdminOverview["recentUsers"]; value: string }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const selected = users.find((user) => user.id === value);
@@ -1504,20 +1467,20 @@ function UserCombobox({ onChange, users, value }: { onChange: (userId: string) =
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-500" />
         <input
-          aria-label="搜索并选择域名所有者"
+          aria-label={ariaLabel}
           autoComplete="one-time-code"
           className={cn(fieldClass, "pl-9 pr-9")}
           data-1p-ignore
           data-form-type="other"
           data-lpignore="true"
-          name="platform-domain-owner-search"
+          name={name}
           onBlur={() => setOpen(false)}
           onChange={(event) => {
             setQuery(event.target.value);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder="搜索用户邮箱或 ID"
+          placeholder={placeholder}
           value={selected && !open ? selected.email : query}
         />
         {value || query ? (
@@ -1584,11 +1547,11 @@ function SearchField({ label, onChange, placeholder, value }: { label: string; o
     </label>
   );
 }
-function SectionHeading({ title, description }: { title: string; description: string }) {
+function SectionHeading({ title, description, descriptionClassName }: { title: string; description: string; descriptionClassName?: string }) {
   return (
     <div>
       <h2 className="text-base font-semibold text-white">{title}</h2>
-      <p className="mt-1 text-sm leading-6 text-zinc-500">{description}</p>
+      <p className={cn("mt-1 text-sm leading-6 text-zinc-500", descriptionClassName)}>{description}</p>
     </div>
   );
 }
@@ -1610,6 +1573,8 @@ function StatusAction({ current, label, onClick }: { current: string; label: str
   );
 }
 function DomainSetupStatus({ domain }: { domain: AdminDomainPrice }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const labels: Record<AdminDomainPrice["setup_status"], string> = {
     pending_zone: "正在创建 Zone",
     pending_nameservers: "等待修改 NS",
@@ -1619,14 +1584,34 @@ function DomainSetupStatus({ domain }: { domain: AdminDomainPrice }) {
   };
   return (
     <div className="mb-2 max-w-64 text-xs leading-5">
-      <span className={domain.setup_status === "active" ? "text-emerald-400" : domain.setup_status === "error" ? "text-red-300" : "text-amber-300"}>{labels[domain.setup_status]}</span>
-      {domain.cloudflare_nameservers.length ? (
-        <div className="mt-1 text-zinc-500">
-          {domain.cloudflare_nameservers.map((nameserver) => (
-            <code className="block select-all" key={nameserver}>
-              {nameserver}
-            </code>
-          ))}
+      <div className="inline-flex items-center gap-2">
+        <span className={domain.setup_status === "active" ? "text-emerald-400" : domain.setup_status === "error" ? "text-red-300" : "text-amber-300"}>{labels[domain.setup_status]}</span>
+        {domain.cloudflare_nameservers.length ? (
+          <button className="shrink-0 text-zinc-500 transition-colors hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60" onClick={() => setOpen((current) => !current)} type="button">查看名称服务器</button>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" onMouseDown={() => setOpen(false)} role="presentation">
+          <div aria-label="名称服务器" aria-modal="true" className="w-full max-w-md rounded-md border border-white/15 bg-zinc-950 p-4 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium text-zinc-200">名称服务器</h3>
+              <button aria-label="关闭名称服务器" className={clearButtonClass.replace("absolute right-2 top-2 ", "")} onClick={() => setOpen(false)} type="button"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="grid gap-1">
+              {domain.cloudflare_nameservers.map((nameserver) => (
+                <button
+                  className="flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left text-zinc-300 transition-colors hover:bg-white/10"
+                  key={nameserver}
+                  onClick={() => void navigator.clipboard.writeText(nameserver).then(() => { setCopied(nameserver); window.setTimeout(() => setCopied(null), 1500); })}
+                  title={`复制 ${nameserver}`}
+                  type="button"
+                >
+                  <code className="truncate select-all">{nameserver}</code>
+                  {copied === nameserver ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <Copy className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       ) : null}
       {domain.setup_error ? <p className="mt-1 break-words text-red-300">{domain.setup_error}</p> : null}

@@ -6,6 +6,7 @@ import {
   Globe2,
   Link2,
   Loader2,
+  Search,
   ShoppingBag,
   Unplug,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import {
   type ProjectSummary,
   type PublicSlot,
 } from "@/lib/api";
+import { displayHostname } from "@qingnest/shared/config/domain";
 
 export function DomainsPage({
   account,
@@ -61,6 +63,8 @@ export function DomainsPage({
     slot: PublicSlot;
     siteId: string | null;
   } | null>(null);
+  const [domainQuery, setDomainQuery] = useState("");
+  const [suffixFilter, setSuffixFilter] = useState("all");
 
   useEffect(() => {
     if (!session) return;
@@ -95,6 +99,12 @@ export function DomainsPage({
     (project) =>
       !boundProjectIds.has(project.id) && project.status === "active",
   );
+  const suffixes = Array.from(new Set(slots.map((slot) => displayHostname(slot.hostname).split(".").at(-1) ?? ""))).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const filteredSlots = slots.filter((slot) => {
+    const display = displayHostname(slot.hostname);
+    const query = domainQuery.trim().toLocaleLowerCase();
+    return (!query || display.toLocaleLowerCase().includes(query) || slot.hostname.toLowerCase().includes(query)) && (suffixFilter === "all" || display.split(".").at(-1) === suffixFilter);
+  });
 
   async function changeBinding(slot: PublicSlot, siteId: string | null) {
     setBindingSlotId(slot.id);
@@ -159,8 +169,20 @@ export function DomainsPage({
                 </button>
               </div>
             ) : (
-              <div className={`${STUDIO_PANEL_CLASS} mt-5 overflow-hidden`}>
-                {slots.map((slot) => {
+              <div className="mt-5">
+                <div className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                  <label className="flex h-10 items-center gap-2 rounded-md border border-white/15 px-3 focus-within:border-white/35">
+                    <Search className="h-4 w-4 shrink-0 text-zinc-500" />
+                    <span className="sr-only">搜索我的域名</span>
+                    <input className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-700" onChange={(event) => setDomainQuery(event.target.value)} placeholder="搜索域名" value={domainQuery} />
+                  </label>
+                  <select aria-label="筛选域名后缀" className="h-10 cursor-pointer rounded-md border border-white/15 bg-black px-3 text-sm text-zinc-200 outline-none focus:border-white/35" onChange={(event) => setSuffixFilter(event.target.value)} value={suffixFilter}>
+                    <option value="all">全部后缀</option>
+                    {suffixes.map((suffix) => <option key={suffix} value={suffix}>.{suffix}</option>)}
+                  </select>
+                </div>
+                <div className={`${STUDIO_PANEL_CLASS} overflow-hidden`}>
+                {filteredSlots.length ? filteredSlots.map((slot) => {
                   const project = slot.siteId
                     ? projectsById.get(slot.siteId)
                     : null;
@@ -172,7 +194,7 @@ export function DomainsPage({
                       <div className="min-w-0">
                         <p className="flex items-center gap-2 truncate text-sm font-semibold text-white">
                           <Globe2 className="h-4 w-4 shrink-0 text-zinc-400" />
-                          {slot.hostname}
+                          {displayHostname(slot.hostname)}
                         </p>
                         <p className="mt-1 text-xs text-zinc-500">
                           {slot.type === "custom_domain"
@@ -252,7 +274,8 @@ export function DomainsPage({
                       </div>
                     </div>
                   );
-                })}
+                }) : <div className="px-4 py-12 text-center text-sm text-zinc-500">没有符合条件的域名</div>}
+                </div>
               </div>
             )}
             {editingSlot && !pendingBinding ? (
@@ -266,7 +289,7 @@ export function DomainsPage({
                     管理绑定
                   </h2>
                   <p className="mt-2 break-all text-sm text-zinc-400">
-                    {editingSlot.hostname}
+                    {displayHostname(editingSlot.hostname)}
                   </p>
                   <p className="mt-3 text-sm leading-6 text-zinc-500">
                     选择操作后还需要再次确认。每次变更后需等待 10
@@ -332,7 +355,7 @@ export function DomainsPage({
                     <div>
                       <dt className="text-xs text-zinc-600">平台地址</dt>
                       <dd className="mt-1 break-all text-zinc-200">
-                        {pendingBinding.slot.hostname}
+                        {displayHostname(pendingBinding.slot.hostname)}
                       </dd>
                     </div>
                     {pendingBinding.slot.siteId ? (
