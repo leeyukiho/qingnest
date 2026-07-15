@@ -36,6 +36,7 @@ import { BillingPage } from "@/pages/BillingPage";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { ToastProvider } from "@/app/toast";
+import { NotificationCenter } from "@/app/NotificationCenter";
 
 const SIDEBAR_ACCOUNT_CACHE_KEY = "kuaipage:sidebar-account";
 
@@ -382,6 +383,7 @@ export function App() {
           authReady={authReady}
           compact={page !== 0 || !isHomeRoute}
           isAuthenticated={Boolean(session && isSessionEmailConfirmed(session))}
+          notificationCenter={<NotificationCenter enabled={Boolean(session && isSessionEmailConfirmed(session))} />}
           onNavigate={navigate}
         />
         {displayedRouteContent}

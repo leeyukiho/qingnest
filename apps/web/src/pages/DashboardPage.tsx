@@ -466,7 +466,7 @@ export function DashboardPage({
                         ) : (
                           <Rocket className="h-4 w-4" />
                         )}
-                        {deploying ? "正在生成" : "生成私人版本"}
+                        {deploying ? "正在上传并生成版本" : "生成私人版本"}
                       </button>
                     </div>
                   </>

@@ -1,4 +1,5 @@
 import { Crown, UserRound } from "lucide-react";
+import type { ReactNode } from "react";
 import type { AccountProfile } from "@/lib/api";
 import { Navbar, NavbarButton, NavbarLogo, NavBody } from "@/components/ui/resizable-navbar";
 import { STUDIO_PATH, STUDIO_PROFILE_PATH } from "@/app/navigation";
@@ -10,6 +11,7 @@ export function SiteNavbar({
   authReady,
   compact,
   isAuthenticated,
+  notificationCenter,
   onNavigate
 }: {
   account: AccountProfile | null;
@@ -17,6 +19,7 @@ export function SiteNavbar({
   authReady: boolean;
   compact: boolean;
   isAuthenticated: boolean;
+  notificationCenter?: ReactNode;
   onNavigate: (path: string) => void;
 }) {
   return (
@@ -38,6 +41,9 @@ export function SiteNavbar({
             <NavbarButton aria-label="\u521B\u5EFA\u7AD9\u70B9" onClick={() => onNavigate(STUDIO_PATH)} variant="secondary">
               {"\u521B\u5EFA\u7AD9\u70B9"}
             </NavbarButton>
+          ) : null}
+          {isAuthenticated ? (
+            notificationCenter
           ) : null}
           {isAuthenticated ? (
             <button

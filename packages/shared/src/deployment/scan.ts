@@ -51,60 +51,6 @@ function normalizeFiles<T extends ScanInputFile>(inputFiles: T[]) {
     .filter((file) => !isArchiveMetadataPath(file.path));
 }
 
-function scoreHtmlRisk(file: ScanInputFile) {
-  const text = file.text?.slice(0, platformConfig.deployment.maxPreviewHtmlBytes) ?? "";
-  let score = 0;
-  const issues: DeploymentScanIssue[] = [];
-
-  if (!text) {
-    return { score, issues };
-  }
-
-  for (const keyword of platformConfig.riskRules.highRiskKeywords) {
-    if (text.includes(keyword)) {
-      score += 10;
-      issues.push({
-        severity: "warning",
-        code: "high_risk_keyword",
-        message: `页面包含高风险词：${keyword}`,
-        path: file.path
-      });
-    }
-  }
-
-  if (/<input[^>]+type=["']?password/i.test(text)) {
-    score += platformConfig.riskRules.passwordInputRiskScore;
-    issues.push({
-      severity: "warning",
-      code: "password_input",
-      message: "页面包含密码输入框，可能需要审核",
-      path: file.path
-    });
-  }
-
-  if (/<form[^>]+action=["']https?:\/\//i.test(text)) {
-    score += platformConfig.riskRules.externalFormActionRiskScore;
-    issues.push({
-      severity: "warning",
-      code: "external_form_action",
-      message: "页面表单提交到外部域名，可能需要审核",
-      path: file.path
-    });
-  }
-
-  if (/(eval\(|atob\(|fromCharCode|base64)/i.test(text)) {
-    score += platformConfig.riskRules.obfuscatedScriptRiskScore;
-    issues.push({
-      severity: "warning",
-      code: "obfuscated_script",
-      message: "页面可能包含混淆脚本",
-      path: file.path
-    });
-  }
-
-  return { score, issues };
-}
-
 function findSuggestedOutputDirectory(paths: string[]) {
   for (const dir of platformConfig.deployment.staticOutputDirectories) {
     if (paths.includes(`${dir}/index.html`)) {
@@ -171,7 +117,6 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
   const files: DeploymentFile[] = [];
   const paths = inputFiles.map((file) => normalizeDeploymentPath(file.path));
   let totalBytes = 0;
-  let riskScore = 0;
 
   for (const inputFile of inputFiles) {
     const path = normalizeDeploymentPath(inputFile.path);
@@ -214,12 +159,6 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
       });
     }
 
-    if (path.toLowerCase().endsWith(".html")) {
-      const risk = scoreHtmlRisk({ ...inputFile, path });
-      riskScore += risk.score;
-      issues.push(...risk.issues);
-    }
-
     files.push({
       path,
       size: inputFile.size,
@@ -231,7 +170,31 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
     issues.push({
       severity: "error",
       code: "too_many_files",
-      message: `文件数量超过当前套餐限制：${plan.quotas.deployment.maxFiles} 个`
+      message: `文件数量超过当前套餐限制：${plan.quotas.deployment.maxFiles} 个。请删除 source map、未引用图片、重复字体和旧构建文件，或升级套餐。`
+    });
+  } else if (files.length >= plan.quotas.deployment.maxFiles * 0.7) {
+    issues.push({
+      severity: "warning",
+      code: "file_limit_near",
+      message: `当前有 ${files.length} 个文件，已接近套餐上限 ${plan.quotas.deployment.maxFiles}。建议关闭 source map、合并小图标并清理未引用资源。`
+    });
+  }
+
+  const tinyAssets = files.filter((file) => file.size > 0 && file.size < 4096 && !isHtmlPath(file.path));
+  if (tinyAssets.length >= 100 && tinyAssets.length >= files.length * 0.4) {
+    issues.push({
+      severity: "info",
+      code: "many_tiny_assets",
+      message: `检测到 ${tinyAssets.length} 个小于 4 KB 的资源。可将小图标合并为图标字体或精灵图，并减少不必要的代码分包。`
+    });
+  }
+
+  const sourceMaps = files.filter((file) => file.path.toLowerCase().endsWith(".map"));
+  if (sourceMaps.length > 0) {
+    issues.push({
+      severity: "info",
+      code: "source_maps_included",
+      message: `包含 ${sourceMaps.length} 个 source map。生产环境不需要调试时可关闭 sourcemap，减少文件数和存储。`
     });
   }
 
@@ -276,13 +239,6 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
     return /createBrowserRouter|BrowserRouter|history\.pushState|vue-router|svelte-routing/.test(text);
   });
 
-  const riskLevel =
-    riskScore >= platformConfig.riskRules.highRiskThreshold
-      ? "high"
-      : riskScore >= platformConfig.riskRules.manualReviewThreshold
-        ? "medium"
-        : "low";
-
   return {
     fileCount: files.length,
     totalBytes,
@@ -290,8 +246,8 @@ export function scanDeploymentFiles(inputFiles: ScanInputFile[], planName = "fre
     likelySourceProject,
     suggestedOutputDirectory,
     spaFallbackRecommended: platformConfig.deployment.spaFallbackDefault || hasRoutingScript,
-    riskScore,
-    riskLevel,
+    riskScore: 0,
+    riskLevel: "low",
     issues,
     files
   };

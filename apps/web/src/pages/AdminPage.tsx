@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { Activity, Ban, CircleDollarSign, Crown, ExternalLink, FolderKanban, Gauge, Globe2, LayoutDashboard, Loader2, Lock, Plus, RefreshCw, RotateCcw, Save, Search, ShieldAlert, Trash2, Users, WalletCards, X } from "lucide-react";
+import { Activity, Ban, Bell, CircleDollarSign, Crown, ExternalLink, FolderKanban, Gauge, Globe2, LayoutDashboard, Loader2, Lock, Plus, RefreshCw, RotateCcw, Save, Search, Send, ServerCog, ShieldAlert, Trash2, Users, WalletCards, X } from "lucide-react";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { RouteMessage, StudioLoading } from "@/app/feedback";
 import { STUDIO_PATH } from "@/app/navigation";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_EYEBROW_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
-import { checkSubdomain, createAdminDomain, createAdminDomainPrice, createAdminPrivatePreview, deleteAdminDomain, deleteAdminDomainPrice, getAdminOverview, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminOverview, type AdminPlan } from "@/lib/api";
+import { checkSubdomain, createAdminDomain, createAdminDomainPrice, createAdminNotification, createAdminPrivatePreview, deleteAdminDomain, deleteAdminDomainPrice, getAdminCapacity, getAdminNotifications, getAdminOverview, updateAdminCapacity, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminNotification, type AdminOverview, type AdminPlan, type CapacityDashboard, type CapacityMetricKey } from "@/lib/api";
 import { clientPlatformConfig } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
-type AdminTab = "overview" | "users" | "projects" | "domains" | "plans" | "benefits" | "reviews" | "audit";
+type AdminTab = "overview" | "capacity" | "users" | "projects" | "domains" | "plans" | "benefits" | "notifications" | "reviews" | "audit";
 type PendingAction = { title: string; description: string; destructive?: boolean; confirmationText?: string; confirmLabel?: string; run: () => Promise<unknown> };
-const tabs = [["overview", "概览", Gauge], ["users", "用户", Users], ["projects", "项目", FolderKanban], ["domains", "域名", Globe2], ["plans", "套餐", CircleDollarSign], ["benefits", "权益", WalletCards], ["reviews", "审核", ShieldAlert], ["audit", "审计", Activity]] as const;
+const tabs = [["overview", "概览", Gauge], ["capacity", "容量", ServerCog], ["users", "用户", Users], ["projects", "项目", FolderKanban], ["domains", "域名", Globe2], ["plans", "套餐", CircleDollarSign], ["benefits", "权益", WalletCards], ["notifications", "通知", Bell], ["reviews", "审核", ShieldAlert], ["audit", "审计", Activity]] as const;
 const statusLabels: Record<string, string> = { draft: "草稿", active: "正常", pending_review: "待审核", blocked: "已封禁", deleted: "已删除" };
 const fieldClass = "h-10 w-full rounded-md border border-white/15 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition-colors focus:border-white/40 disabled:cursor-not-allowed disabled:opacity-50 [&[type=number]]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 const clearButtonClass = "absolute right-2 top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded text-zinc-500 transition-colors hover:bg-white/10 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60";
@@ -108,11 +108,13 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
       <ToastMessage message={error} />
       {loading && !overview ? <div className="mt-10 flex justify-center gap-2 text-sm text-zinc-400"><Loader2 className="h-4 w-4 shrink-0 animate-spin" />正在汇总平台数据</div> : null}
       {overview && tab === "overview" ? <Overview data={overview} /> : null}
+      {overview && tab === "capacity" ? <CapacityPanel /> : null}
       {overview && tab === "users" ? <><SearchField label="筛选用户" onChange={setUserQuery} placeholder="搜索邮箱、用户 ID、角色或套餐" value={userQuery} /><DataTable headers={["账号", "加入时间", "角色", "套餐"]}>{filteredUsers.map((user) => <tr className="border-b border-white/10 last:border-0" key={user.id}><Cell><span className="block max-w-64 truncate text-zinc-200">{user.email}</span><span className="text-xs text-zinc-600">{user.id}</span></Cell><Cell>{dateTime(user.createdAt)}</Cell><Cell><select aria-label={`${user.email} 的角色`} className={selectClass} onChange={(e) => changeUser(user.id, user.email, "role", e.target.value)} value={user.role}><option value="user">用户</option><option value="admin">管理员</option></select></Cell><Cell><select aria-label={`${user.email} 的套餐`} className={selectClass} onChange={(e) => changeUser(user.id, user.email, "plan", e.target.value)} value={user.plan}>{overview.plans.filter((plan) => plan.enabled || plan.key === user.plan).map((plan) => <option key={plan.key} value={plan.key}>{plan.label}</option>)}</select></Cell></tr>)}</DataTable></> : null}
       {overview && tab === "projects" ? <><SearchField label="筛选项目" onChange={setProjectQuery} placeholder="搜索项目名称、所有者或项目 ID" value={projectQuery} /><DataTable headers={["项目", "所有者", "更新时间", "状态", "操作"]}>{filteredProjects.map((site) => { const hostname = projectHostnames.get(site.id); return <tr className="border-b border-white/10 last:border-0" key={site.id}><Cell><span className="text-zinc-200">{site.name}</span><span className="block text-xs text-zinc-600">{site.id}</span></Cell><Cell>{site.ownerEmail}</Cell><Cell>{dateTime(site.updatedAt)}</Cell><Cell><StatusBadge status={site.status} /></Cell><Cell className="w-52"><div className="flex min-w-[12rem] items-center justify-start gap-1">{hostname ? <a className={cn(quietButton, "w-24")} href={`${clientPlatformConfig.domains.publicProtocol}://${hostname}`} rel="noreferrer" target="_blank"><ExternalLink className="h-4 w-4 shrink-0" />访问</a> : <button className={cn(quietButton, "w-24 shrink-0 whitespace-nowrap")} disabled={previewingSiteId === site.id || site.status === "blocked"} onClick={() => void previewSite(site.id)} title="创建 10 分钟有效的管理员临时预览，不分配公开域名" type="button">{previewingSiteId === site.id ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <ExternalLink className="h-4 w-4 shrink-0" />}临时预览</button>}<StatusAction current={site.status} label={site.name} onClick={() => changeStatus("项目", site.id, site.name, site.status)} /></div></Cell></tr>; })}</DataTable></> : null}
       {overview && tab === "domains" ? <DomainsPanel data={overview} domainForm={domainForm} priceDrafts={priceDrafts} setDomainForm={setDomainForm} setPriceDrafts={setPriceDrafts} usersById={usersById} confirm={confirm} changeStatus={changeStatus} /> : null}
       {overview && tab === "plans" ? <PlansPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
       {overview && tab === "benefits" ? <BenefitsPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
+      {overview && tab === "notifications" ? <NotificationsPanel /> : null}
       {overview && tab === "reviews" ? <DataTable headers={["项目 / 版本", "风险", "文件", "体积", "提交时间"]}>{overview.reviewDeployments.map((item) => <tr className="border-b border-white/10 last:border-0" key={item.id}><Cell>{item.siteName} · v{item.version}</Cell><Cell>{item.riskScore}</Cell><Cell>{item.fileCount}</Cell><Cell>{Math.round(item.totalBytes / 1024)} KB</Cell><Cell>{dateTime(item.createdAt)}</Cell></tr>)}</DataTable> : null}
       {overview && tab === "audit" ? <DataTable headers={["事件", "说明", "风险", "时间"]}>{overview.auditEvents.map((item) => <tr className="border-b border-white/10 last:border-0" key={item.id}><Cell><code>{item.eventType}</code></Cell><Cell>{item.message}</Cell><Cell>{item.riskScore}</Cell><Cell>{dateTime(item.createdAt)}</Cell></tr>)}</DataTable> : null}
     </main>
@@ -121,6 +123,61 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
 }
 
 function Overview({ data }: { data: AdminOverview }) { const stats = [["用户", data.users], ["项目", data.sites], ["平台域名", data.domains], ["部署", data.deployments], ["待审核", data.pendingReviewSites], ["已封禁", data.blockedSites]]; return <div className="mt-5 grid gap-x-8 gap-y-6 border-y border-white/15 py-5 sm:grid-cols-2 xl:grid-cols-3">{stats.map(([label, value]) => <div key={label}><span className="text-sm text-zinc-500">{label}</span><p className="mt-1 text-2xl font-semibold text-white">{value}</p></div>)}</div>; }
+
+const capacityMetricMeta: Record<CapacityMetricKey, { label: string; unit: string; measured: boolean }> = {
+  workerRequests: { label: "Worker 请求", unit: "次/月", measured: false }, kvReads: { label: "KV 读取", unit: "次/月", measured: false }, kvWrites: { label: "KV 写入", unit: "次/月", measured: false }, r2StorageBytes: { label: "R2 内容体积", unit: "字节", measured: true }, r2ClassA: { label: "R2 写操作估算", unit: "次/月", measured: true }, r2ClassB: { label: "R2 读操作", unit: "次/月", measured: false }, pagesDeployments: { label: "Pages 部署", unit: "次/月", measured: true }, pagesProjects: { label: "Pages 项目", unit: "个", measured: true },
+};
+const compactNumber = (value: number) => new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1, notation: value >= 10_000 ? "compact" : "standard" }).format(value);
+const formatCapacityValue = (key: CapacityMetricKey, value: number) => key === "r2StorageBytes" ? `${(value / 1024 / 1024 / 1024).toFixed(2)} GB` : compactNumber(value);
+
+function CapacityPanel() {
+  const [data, setData] = useState<CapacityDashboard | null>(null); const [draft, setDraft] = useState<CapacityDashboard["settings"] | null>(null); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => { setLoading(true); setError(null); try { const next = await getAdminCapacity(); setData(next); setDraft(next.settings); } catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取容量数据"); } finally { setLoading(false); } }, []);
+  useEffect(() => { void load(); }, [load]);
+  if (loading && !data) return <div className="mt-10 flex items-center justify-center gap-2 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />正在读取容量状态</div>;
+  if (!data || !draft) return <ToastMessage message={error ?? "容量状态不可用"} />;
+  const applyPreset = (stage: string) => { const preset = data.presets[stage]; if (!preset) return; setDraft((current) => current ? { ...current, stage: stage as CapacityDashboard["settings"]["stage"], limits: { ...preset.limits }, warningPercent: preset.warningPercent, criticalPercent: preset.criticalPercent } : current); };
+  const save = async () => { setSaving(true); setError(null); try { const next = await updateAdminCapacity(draft); setData(next); setDraft(next.settings); } catch (cause) { setError(cause instanceof Error ? cause.message : "保存失败"); } finally { setSaving(false); } };
+  return <section className="mt-5"><div className="flex flex-col gap-4 border-b border-white/15 pb-5 lg:flex-row lg:items-end lg:justify-between"><SectionHeading title="基础设施容量与预警" description="仅管理员可见。这里不创建用户通知，也不弹窗；修改草稿会立即重算比例，保存时仅写入一次。" /><div className="flex flex-wrap gap-2">{Object.entries(data.presets).map(([key, preset]) => <button className={cn(quietButton, draft.stage === key && "bg-white/10 text-white")} key={key} onClick={() => applyPreset(key)} type="button">{preset.label}</button>)}<button className={saveButton} disabled={saving} onClick={() => void save()} type="button">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}保存设置</button><button aria-label="刷新容量状态" className={quietButton} disabled={loading} onClick={() => void load()} title="主动刷新一次，不启用自动轮询" type="button"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /></button></div></div><ToastMessage message={error} />
+    <div className="grid gap-4 border-b border-white/15 py-5 md:grid-cols-3"><label className="grid gap-1 text-xs text-zinc-500">提醒阈值（%）<input className={fieldClass} max={99} min={1} onChange={(e) => setDraft({ ...draft, warningPercent: Number(e.target.value) })} type="number" value={draft.warningPercent} /></label><label className="grid gap-1 text-xs text-zinc-500">严重阈值（%）<input className={fieldClass} max={100} min={2} onChange={(e) => setDraft({ ...draft, criticalPercent: Number(e.target.value) })} type="number" value={draft.criticalPercent} /></label><label className="grid gap-1 text-xs text-zinc-500">管理员提醒冷却（小时）<input className={fieldClass} max={720} min={1} onChange={(e) => setDraft({ ...draft, notificationCooldownHours: Number(e.target.value) })} type="number" value={draft.notificationCooldownHours} /></label></div>
+    <div className="overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead><tr className="border-b border-white/15 text-zinc-500"><th className="px-3 py-3 font-medium">资源</th><th className="px-3 py-3 font-medium">已用</th><th className="px-3 py-3 font-medium">当前额度</th><th className="px-3 py-3 font-medium">使用率</th><th className="px-3 py-3 font-medium">状态</th></tr></thead><tbody>{(Object.keys(capacityMetricMeta) as CapacityMetricKey[]).map((key) => { const used = data.observed[key]; const limit = draft.limits[key]; const percent = limit > 0 ? Math.min(999, used / limit * 100) : 0; const severity = percent >= draft.criticalPercent ? "critical" : percent >= draft.warningPercent ? "warning" : "normal"; return <tr className="border-b border-white/10 last:border-0" key={key}><Cell><span className="text-zinc-200">{capacityMetricMeta[key].label}</span><span className="block text-xs text-zinc-600">{capacityMetricMeta[key].unit}{capacityMetricMeta[key].measured ? " · 平台记录" : " · 待接账单采样"}</span></Cell><Cell>{formatCapacityValue(key, used)}</Cell><Cell><input aria-label={`${capacityMetricMeta[key].label}额度`} className={cn(fieldClass, "w-44")} min={1} onChange={(e) => setDraft({ ...draft, limits: { ...draft.limits, [key]: Number(e.target.value) } })} type="number" value={limit} /></Cell><Cell><div className="flex items-center gap-3"><div className="h-2 w-36 overflow-hidden rounded-full bg-zinc-800"><div className={cn("h-full transition-[width] duration-200", severity === "critical" ? "bg-red-400" : severity === "warning" ? "bg-amber-400" : "bg-emerald-400")} style={{ width: `${Math.min(100, percent)}%` }} /></div><span className="w-16 tabular-nums text-zinc-300">{percent.toFixed(1)}%</span></div></Cell><Cell><span className={severity === "critical" ? "text-red-300" : severity === "warning" ? "text-amber-300" : "text-emerald-300"}>{severity === "critical" ? "严重" : severity === "warning" ? "提醒" : "正常"}</span></Cell></tr>; })}</tbody></table></div>
+    <div className="mt-5 grid gap-4 border-y border-white/15 py-4 text-sm sm:grid-cols-3"><div><span className="text-zinc-500">当前阶段</span><p className="mt-1 text-zinc-200">{data.presets[draft.stage]?.label}</p></div><div><span className="text-zinc-500">正在加速</span><p className="mt-1 text-zinc-200">{data.acceleratedSites} 个站点</p></div><div><span className="text-zinc-500">采样时间</span><p className="mt-1 text-zinc-200">{dateTime(data.sampledAt)}</p></div></div><p className="mt-3 text-xs leading-5 text-zinc-500">{data.scopeNote} 自动提醒将写入管理员审计链路，绝不复用用户通知中心。</p>
+  </section>;
+}
+
+function NotificationsPanel() {
+  const [items, setItems] = useState<AdminNotification[]>([]);
+  const [audience, setAudience] = useState<"all" | "user">("all");
+  const [recipient, setRecipient] = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => { try { setItems(await getAdminNotifications()); } catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取通知"); } }, []);
+  useEffect(() => { void load(); }, [load]);
+  async function send() {
+    setBusy(true); setError(null);
+    try {
+      const created = await createAdminNotification({ title, body, audience, recipient: audience === "user" ? recipient : undefined });
+      setItems((current) => [created, ...current]); setTitle(""); setBody(""); setRecipient("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "发送失败"); }
+    finally { setBusy(false); }
+  }
+  return <section className="mt-5">
+    <SectionHeading title="发送通知" description="全平台公告会弹给所有用户；定向通知仅发送给指定账号。用户确认后仍可在通知中心回看。" />
+    <div className="mt-4 border-y border-white/15 py-5">
+      <div aria-label="发送范围" className="inline-flex rounded-md bg-zinc-900 p-1" role="tablist"><button aria-selected={audience === "all"} className={cn("h-9 rounded px-4 text-sm font-medium", audience === "all" ? "bg-white text-black" : "text-zinc-400")} onClick={() => setAudience("all")} role="tab" type="button">全平台</button><button aria-selected={audience === "user"} className={cn("h-9 rounded px-4 text-sm font-medium", audience === "user" ? "bg-white text-black" : "text-zinc-400")} onClick={() => setAudience("user")} role="tab" type="button">指定用户</button></div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {audience === "user" ? <label className="grid gap-1 text-xs text-zinc-500 lg:col-span-2">用户邮箱或 ID<ClearableInput aria-label="用户邮箱或 ID" onChange={(event) => setRecipient(event.target.value)} placeholder="user@example.com" value={recipient} /></label> : null}
+        <label className="grid gap-1 text-xs text-zinc-500 lg:col-span-2">标题<ClearableInput aria-label="通知标题" maxLength={120} onChange={(event) => setTitle(event.target.value)} placeholder="例如：服务维护通知" value={title} /></label>
+        <label className="grid gap-1 text-xs text-zinc-500 lg:col-span-2">正文<textarea aria-label="通知正文" className={cn(fieldClass, "h-32 resize-y py-3 leading-6")} maxLength={4000} onChange={(event) => setBody(event.target.value)} placeholder="填写需要用户确认收到的内容" value={body} /></label>
+      </div>
+      {error ? <p className="mt-3 text-sm text-red-300" role="alert">{error}</p> : null}
+      <button className={cn(saveButton, "mt-4")} disabled={busy || !title.trim() || !body.trim() || (audience === "user" && !recipient.trim())} onClick={() => void send()} type="button">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}发送通知</button>
+    </div>
+    <div className="mt-7"><SectionHeading title="发送记录" description="最近 100 条通知，按发送时间倒序排列。" /><DataTable headers={["标题", "范围", "正文", "发送时间"]}>{items.map((item) => <tr className="border-b border-white/10 last:border-0" key={item.id}><Cell><span className="font-medium text-zinc-200">{item.title}</span><span className="mt-1 block text-xs text-zinc-600">由 {item.createdByEmail || "管理员"} 发送</span></Cell><Cell>{item.audience === "all" ? "全平台" : item.recipientEmail ?? "指定用户"}</Cell><Cell><span className="block max-w-md whitespace-pre-wrap text-zinc-400">{item.body}</span></Cell><Cell>{dateTime(item.createdAt)}</Cell></tr>)}</DataTable></div>
+  </section>;
+}
 
 function PlansPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan[]; drafts: Record<string, AdminPlan>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, AdminPlan>>>; confirm: (action: PendingAction) => void }) {
   const [prices, setPrices] = useState(() => Object.fromEntries(plans.map((plan) => [plan.key, { monthly: String(plan.monthly_price_cents / 100), renewal: String(plan.renewal_price_cents / 100) }])));
@@ -137,7 +194,7 @@ function PlansPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan[];
 }
 
 function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan[]; drafts: Record<string, AdminPlan>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, AdminPlan>>>; confirm: (action: PendingAction) => void }) {
-  const quotas: Array<[keyof AdminPlan, string, (value: number) => string, (value: string) => number]> = [["max_sites", "项目数", String, Number], ["max_public_sites", "公开项目", String, Number], ["max_storage_bytes", "存储空间（MB）", (v) => String(Math.round(v / 1024 / 1024)), (v) => Number(v) * 1024 * 1024], ["max_deployments_per_day", "每日部署", String, Number], ["max_domains_per_site", "单项目域名", String, Number]];
+  const quotas: Array<[keyof AdminPlan, string, (value: number) => string, (value: string) => number]> = [["max_sites", "项目数", String, Number], ["max_public_sites", "公开项目", String, Number], ["max_storage_bytes", "存储空间（MB）", (v) => String(Math.round(v / 1024 / 1024)), (v) => Number(v) * 1024 * 1024], ["max_deployments_per_day", "每日部署", String, Number], ["max_domains_per_site", "单项目域名", String, Number], ["max_files", "单次部署文件数", String, Number]];
   const capabilities: Array<[keyof AdminPlan, string]> = [["password_protection", "密码保护"], ["access_analytics", "访问统计"], ["remove_branding", "移除品牌"], ["rollback", "版本回滚"], ["source_build", "源码构建"]];
   const [values, setValues] = useState(() => Object.fromEntries(plans.flatMap((plan) => quotas.map(([key, , format]) => [`${plan.key}.${key}`, format(plan[key] as number)]))));
   const [errors, setErrors] = useState<Record<string, string>>({});

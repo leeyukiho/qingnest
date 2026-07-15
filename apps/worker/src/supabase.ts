@@ -240,8 +240,8 @@ export type Database = {
         Relationships: EmptyRelationships;
       };
       plan_catalog: {
-        Row: { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
-        Insert: { key: string; label: string; enabled?: boolean; monthly_price_cents?: number; renewal_price_cents?: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain?: boolean; password_protection?: boolean; access_analytics?: boolean; remove_branding?: boolean; rollback?: boolean; source_build?: boolean; updated_at?: string };
+        Row: { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
+        Insert: { key: string; label: string; enabled?: boolean; monthly_price_cents?: number; renewal_price_cents?: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; max_files?: number; custom_domain?: boolean; password_protection?: boolean; access_analytics?: boolean; remove_branding?: boolean; rollback?: boolean; source_build?: boolean; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["plan_catalog"]["Insert"]>;
         Relationships: EmptyRelationships;
       };

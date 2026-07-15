@@ -12,7 +12,8 @@ export function getContentType(path: string) {
 }
 
 export function isHashedAsset(path: string) {
-  return /(?:^|[.-])[a-f0-9]{8,}(?:\.|$)/i.test(path);
+  const filename = path.split("/").pop() ?? path;
+  return /(?:^|[.-])[a-z0-9_-]{8,}(?=\.[a-z0-9]+$)/i.test(filename);
 }
 
 export function getCacheControl(path: string) {
@@ -24,4 +25,3 @@ export function getCacheControl(path: string) {
 
   return isHashedAsset(path) ? platformConfig.cache.assetsWithHash : platformConfig.cache.assetsDefault;
 }
-

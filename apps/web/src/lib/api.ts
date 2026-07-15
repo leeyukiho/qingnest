@@ -195,8 +195,12 @@ export type AdminOverview = {
   domainPricing: AdminDomainPrice[];
 };
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
-export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
+export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_domains_per_site: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
 export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; updated_at: string };
+export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
+export type AdminNotification = NotificationItem & { recipientEmail: string | null; createdByEmail: string };
+export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects";
+export type CapacityDashboard = { settings: { stage: "workers_paid" | "workers_paid_stable" | "pages_pro"; limits: Record<CapacityMetricKey, number>; warningPercent: number; criticalPercent: number; notificationCooldownHours: number; updatedAt: string }; observed: Record<CapacityMetricKey, number>; acceleratedSites: number; sampledAt: string; scopeNote: string; presets: Record<string, { label: string; limits: Record<CapacityMetricKey, number>; warningPercent: number; criticalPercent: number }> };
 
 const ADMIN_OVERVIEW_CACHE_MS = 30_000;
 let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
@@ -262,6 +266,12 @@ export const updateAdminPlan = (key: string, input: Partial<AdminPlan>) => admin
 export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], input: Partial<AdminDomainPrice>) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "PATCH", input);
 export const createAdminDomainPrice = (input: Omit<AdminDomainPrice, "updated_at">) => adminMutation("/api/admin/domain-pricing", "POST", input);
 export const deleteAdminDomainPrice = (type: string) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "DELETE");
+export const getNotifications = () => request<NotificationItem[]>("/api/notifications");
+export const acknowledgeNotification = (id: string) => request<{ acknowledgedAt: string }>(`/api/notifications/${encodeURIComponent(id)}/acknowledge`, { method: "POST" });
+export const getAdminNotifications = () => request<AdminNotification[]>("/api/admin/notifications");
+export const createAdminNotification = (input: { title: string; body: string; audience: "all" | "user"; recipient?: string }) => adminMutation<AdminNotification>("/api/admin/notifications", "POST", input);
+export const getAdminCapacity = () => request<CapacityDashboard>("/api/admin/capacity");
+export const updateAdminCapacity = (input: CapacityDashboard["settings"]) => adminMutation<CapacityDashboard>("/api/admin/capacity", "PATCH", input);
 
 export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "enabled">;
 export const getPlatformDomainCatalog = () => request<PlatformDomainOption[]>("/api/domain-catalog");

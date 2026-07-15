@@ -156,7 +156,7 @@
         },
         "deployment": {
           "maxArchiveBytes": 52428800,
-          "maxFileBytes": 10485760,
+          "maxFileBytes": 26214400,
           "maxFiles": 1000,
           "maxPathLength": 240,
           "uploadSessionTtlMinutes": 30
@@ -199,7 +199,7 @@
         },
         "deployment": {
           "maxArchiveBytes": 104857600,
-          "maxFileBytes": 52428800,
+          "maxFileBytes": 26214400,
           "maxFiles": 3000,
           "maxPathLength": 240,
           "uploadSessionTtlMinutes": 60
@@ -242,7 +242,7 @@
         },
         "deployment": {
           "maxArchiveBytes": 524288000,
-          "maxFileBytes": 104857600,
+          "maxFileBytes": 26214400,
           "maxFiles": 10000,
           "maxPathLength": 240,
           "uploadSessionTtlMinutes": 120
@@ -285,8 +285,8 @@
         },
         "deployment": {
           "maxArchiveBytes": 1073741824,
-          "maxFileBytes": 104857600,
-          "maxFiles": 10000,
+          "maxFileBytes": 26214400,
+          "maxFiles": 20000,
           "maxPathLength": 240,
           "uploadSessionTtlMinutes": 120
         },
@@ -316,13 +316,22 @@
   },
   "trafficAcceleration": {
     "evaluationWindowMinutes": 15,
-    "promoteRequestsInWindow": 15000,
-    "promoteConsecutiveWindows": 2,
-    "cooldownRequestsInWindow": 1500,
+    "promoteRequestsInWindow": 100,
+    "promoteConsecutiveWindows": 1,
+    "cooldownRequestsInWindow": 10,
     "cooldownConsecutiveWindows": 96,
     "freeProtectionHours": 72,
     "paidProtectionHours": 168,
     "maxPagesProjects": 85,
+    "immediatePagesFileThreshold": 800,
+    "replacementScoreRatio": 1.5,
+    "minimumPagesResidenceMinutes": 60,
+    "planScoreWeights": {
+      "free": 1,
+      "starter": 1.25,
+      "pro": 1.75,
+      "business": 2.5
+    },
     "maxDirectUploadBytes": 94371840,
     "maxPagesFileBytes": 26214400,
     "maxPagesFiles": 20000
@@ -392,7 +401,7 @@
     "html": "no-cache",
     "assetsWithHash": "public, max-age=31536000, immutable",
     "assetsDefault": "public, max-age=3600",
-    "edgeTtlSeconds": 60,
+    "edgeTtlSeconds": 300,
     "edgeNegativeTtlSeconds": 15,
     "domainMappingTtlMs": 60000,
     "domainMappingNegativeTtlMs": 15000,

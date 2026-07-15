@@ -20,6 +20,7 @@ import {
   getAdminOverview,
   getAuthenticatedUser,
   getProject,
+  getUserPlan,
   listProjects,
   listPublicSlots,
   rentPublicSlot,
@@ -34,11 +35,16 @@ import {
   updateAdminDomainPrice,
   createAdminDomainPrice,
   deleteAdminDomainPrice,
+  acknowledgeNotification,
+  createAdminNotification,
+  getAdminNotifications,
+  getNotifications,
   updateProjectName,
   signUpWithEmailPassword,
 } from "./state";
 import { hasServiceSupabase } from "./supabase";
 import type { Env } from "./types";
+import { getCapacityDashboard, updateCapacitySettings } from "./capacity";
 
 type SiteCreateInput = {
   name?: string;
@@ -64,6 +70,7 @@ type SignUpInput = {
 type AdminUserUpdateInput = { role?: "user" | "admin"; plan?: string };
 type AdminSiteUpdateInput = { status?: "draft" | "active" | "pending_review" | "blocked" };
 type AdminDomainInput = { userId?: string; hostname?: string; type?: "platform_subdomain" | "custom_domain"; siteId?: string | null };
+type AdminNotificationInput = { title?: string; body?: string; audience?: "all" | "user"; recipient?: string };
 
 const subdomainCheckWindows = new Map<
   string,
@@ -186,6 +193,42 @@ export async function handleApi(request: Request, env: Env) {
       }
 
       return json(await getAdminOverview(env, user));
+    }
+    if (url.pathname === "/api/admin/capacity" && request.method === "GET") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await getCapacityDashboard(env, user));
+    }
+    if (url.pathname === "/api/admin/capacity" && request.method === "PATCH") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await updateCapacitySettings(env, user, await readJson(request)));
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/notifications") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await getNotifications(env, user));
+    }
+
+    const notificationAckMatch = url.pathname.match(/^\/api\/notifications\/([^/]+)\/acknowledge$/);
+    if (request.method === "POST" && notificationAckMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await acknowledgeNotification(env, user, decodeURIComponent(notificationAckMatch[1] ?? "")));
+    }
+
+    if (url.pathname === "/api/admin/notifications" && request.method === "GET") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await getAdminNotifications(env, user));
+    }
+
+    if (url.pathname === "/api/admin/notifications" && request.method === "POST") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<AdminNotificationInput>(request);
+      return json(await createAdminNotification(env, user, input), { status: 201 });
     }
 
     const adminUserMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
@@ -415,11 +458,11 @@ export async function handleApi(request: Request, env: Env) {
         return problem("缺少站点或扫描结果");
       }
 
+      const user = await maybeGetUser(request, env);
       const trustedScan = scanDeploymentFiles(
         input.scan.files.map((file) => ({ path: file.path, size: file.size })),
-        "free",
+        user ? await getUserPlan(env, user) : "free",
       );
-      const user = await maybeGetUser(request, env);
 
       const result = await createUploadSession(env, {
         siteId: input.siteId,

@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent, type InputHTMLAttributes, type MouseEvent } from "react";
-import { FileArchive, FolderUp, UploadCloud, X } from "lucide-react";
+import { FileArchive, FolderUp, Loader2, UploadCloud, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type DirectoryInputProps = InputHTMLAttributes<HTMLInputElement> & {
@@ -129,13 +129,15 @@ export function FileUpload({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const directoryInputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+  const inactive = disabled || collecting;
   const selectedFile = files[0] ?? null;
   const totalSize = files.reduce((total, file) => total + file.size, 0);
   const hasMultipleFiles = files.length > 1;
   const directoryInputProps: DirectoryInputProps = allowDirectories ? { directory: "", webkitdirectory: "" } : {};
 
   function emitFiles(fileList: FileList | File[] | null) {
-    if (!fileList || disabled) return;
+    if (!fileList || inactive) return;
 
     const nextFiles = Array.from(fileList);
     onChange(multiple || allowDirectories ? nextFiles : nextFiles.slice(0, 1));
@@ -150,17 +152,20 @@ export function FileUpload({
 
   async function chooseDirectory(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
-    if (disabled) return;
+    if (inactive) return;
 
     const showDirectoryPicker = (window as DirectoryPickerWindow).showDirectoryPicker;
 
     if (showDirectoryPicker) {
       try {
+        setCollecting(true);
         onChange(await collectDirectoryHandleFiles(await showDirectoryPicker({ mode: "read" })));
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           throw error;
         }
+      } finally {
+        setCollecting(false);
       }
 
       return;
@@ -176,27 +181,39 @@ export function FileUpload({
         dragging
           ? "border-white bg-white/[0.03]"
           : "border-white/15 hover:border-white/40 hover:bg-white/[0.02]",
-        disabled && "pointer-events-none opacity-60"
+        inactive && "pointer-events-none opacity-60"
       )}
       onDragLeave={() => setDragging(false)}
       onDragOver={(event) => {
         event.preventDefault();
-        if (!disabled) setDragging(true);
+        if (!inactive) setDragging(true);
       }}
       onDrop={async (event) => {
         event.preventDefault();
         setDragging(false);
-        emitFiles(await getDroppedFiles(event));
+        if (inactive) return;
+        setCollecting(true);
+        try {
+          const droppedFiles = await getDroppedFiles(event);
+          onChange(multiple || allowDirectories ? droppedFiles : droppedFiles.slice(0, 1));
+        } finally {
+          setCollecting(false);
+        }
       }}
     >
       <input
         ref={fileInputRef}
         accept={accept}
         className="sr-only"
-        disabled={disabled}
+        disabled={inactive}
         multiple={multiple || allowDirectories}
         onChange={(event) => {
-          emitFiles(event.target.files);
+          setCollecting(true);
+          try {
+            emitFiles(event.target.files);
+          } finally {
+            setCollecting(false);
+          }
           event.currentTarget.value = "";
         }}
         type="file"
@@ -205,10 +222,15 @@ export function FileUpload({
         <input
           ref={directoryInputRef}
           className="sr-only"
-          disabled={disabled}
+          disabled={inactive}
           multiple
           onChange={(event) => {
-            emitFiles(event.target.files);
+            setCollecting(true);
+            try {
+              emitFiles(event.target.files);
+            } finally {
+              setCollecting(false);
+            }
             event.currentTarget.value = "";
           }}
           type="file"
@@ -219,13 +241,15 @@ export function FileUpload({
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
       <div className="relative z-10 flex flex-col items-center">
         <span className="flex h-14 w-14 items-center justify-center rounded-md border border-white/20 bg-black text-zinc-100">
-          {selectedFile ? hasMultipleFiles ? <FolderUp className="h-6 w-6" /> : <FileArchive className="h-6 w-6" /> : <UploadCloud className="h-6 w-6" />}
+          {collecting ? <Loader2 className="h-6 w-6 animate-spin" /> : selectedFile ? hasMultipleFiles ? <FolderUp className="h-6 w-6" /> : <FileArchive className="h-6 w-6" /> : <UploadCloud className="h-6 w-6" />}
         </span>
         <p className="mt-5 text-base font-semibold text-white">
-          {selectedFile ? (hasMultipleFiles ? `已选择 ${files.length} 个文件` : selectedFile.name) : "点击或拖拽文件夹 / 文件到这里"}
+          {collecting ? "正在读取文件" : selectedFile ? (hasMultipleFiles ? `已选择 ${files.length} 个文件` : selectedFile.name) : "点击或拖拽文件夹 / 文件到这里"}
         </p>
         <p className="mt-2 max-w-md text-sm leading-6 text-zinc-400">
-          {selectedFile
+          {collecting
+            ? "请稍候，完成后会自动检查文件数量和大小"
+            : selectedFile
             ? `${(totalSize / 1024 / 1024).toFixed(2)} MB`
             : "支持直接上传包含 index.html 的文件夹、多个文件、单个 HTML 文件，也兼容 ZIP。"}
         </p>

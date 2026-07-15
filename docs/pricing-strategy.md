@@ -254,7 +254,16 @@ Analytics Engine 统计仍在 Worker 上的站点；迁移 Pages 后由 Cloudfla
 7. 接近 70 个 Pages 项目时提交提额申请。
 8. 有稳定付费用户后再开放自有域名和 Cloudflare for SaaS，避免过早增加客服复杂度。
 
-## 13. 官方价格来源
+## 13. 分阶段 Pages 容量预算与管理员预警
+
+- `$5 起步期`：Workers Paid + Pages Free。Pages 每月 500 次部署，建议提醒/严重阈值为 `60% / 80%`，为首次迁移、失败重试和免费站临时保护保留更大余量。
+- `$5 稳定期`：仍使用 Pages Free，业务链路稳定后改为 `70% / 90%`；月部署超过 350 次或第 20 天前超过 300 次时评估升级。
+- `$5 + $25 扩容期`：Pages 预算按 5,000 次/月管理，默认 `70% / 90%`；升级前必须以 Cloudflare 控制台实际显示的账户额度为准。
+- 免费版只提供最长 72 小时临时保护；入门版不保证长期槽位；专业版保证 1 个槽位；商务版保证 3 个槽位。平台发布次数与 Pages 同步次数必须分别计量。
+- 管理后台“容量”页显示已用次数、额度和即时比例。预设和每个数值均可调整；键入只在浏览器重算，保存时一次写入。
+- 定时预警只写管理员审计事件，使用冷却窗口去重；绝不写用户通知表，也不在用户侧弹窗。未接入 Cloudflare Analytics 的账单指标必须标注为待采样，不得用平台估算冒充账单数据。
+
+## 14. 官方价格来源
 
 - Cloudflare Workers、KV、R2：https://developers.cloudflare.com/workers/platform/pricing/
 - Cloudflare R2：https://developers.cloudflare.com/r2/pricing/

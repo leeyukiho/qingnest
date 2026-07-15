@@ -796,7 +796,7 @@ export function ProjectDetailPage({
                     ) : (
                       <UploadCloud className="h-4 w-4" />
                     )}
-                    {busy ? "正在发布" : checking ? "检查中" : "发布新版本"}
+                    {busy ? "正在上传并发布" : checking ? "检查中" : "发布新版本"}
                   </button>
                 </form>
                 <div className={`${STUDIO_PANEL_CLASS} overflow-hidden`}>

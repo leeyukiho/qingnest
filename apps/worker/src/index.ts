@@ -3,6 +3,7 @@ import { withSecurityHeaders } from "./http";
 import { handleSiteRequest } from "./router";
 import type { Env } from "./types";
 import { runTrafficLifecycle } from "./traffic";
+import { evaluateCapacityAlerts } from "./capacity";
 
 export default {
   async fetch(
@@ -19,6 +20,6 @@ export default {
     return handleSiteRequest(request, env, context);
   },
   async scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
-    context.waitUntil(runTrafficLifecycle(env));
+    context.waitUntil(Promise.all([runTrafficLifecycle(env), evaluateCapacityAlerts(env)]));
   },
 };

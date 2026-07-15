@@ -1010,6 +1010,68 @@ async function requireAdmin(env: Env, user: AuthenticatedUser) {
   return createServiceSupabase(env);
 }
 
+export type NotificationItem = {
+  id: string;
+  title: string;
+  body: string;
+  audience: "all" | "user";
+  acknowledgedAt: string | null;
+  createdAt: string;
+};
+
+export async function getNotifications(env: Env, user: AuthenticatedUser): Promise<NotificationItem[]> {
+  const supabase = createServiceSupabase(env);
+  const [{ data: notifications, error }, { data: receipts, error: receiptsError }] = await Promise.all([
+    (supabase as any).from("notifications").select("id, title, body, audience, created_at").or(`audience.eq.all,user_id.eq.${user.id}`).order("created_at", { ascending: false }).limit(100),
+    (supabase as any).from("notification_receipts").select("notification_id, acknowledged_at").eq("user_id", user.id),
+  ]);
+  if (error || receiptsError) throw new Error((error ?? receiptsError)!.message);
+  const acknowledged = new Map<string, string>((receipts ?? []).map((item: any) => [item.notification_id, item.acknowledged_at]));
+  return (notifications ?? []).map((item: any) => ({ id: item.id, title: item.title, body: item.body, audience: item.audience, acknowledgedAt: acknowledged.get(item.id) ?? null, createdAt: item.created_at }));
+}
+
+export async function acknowledgeNotification(env: Env, user: AuthenticatedUser, notificationId: string) {
+  const supabase = createServiceSupabase(env);
+  const { data: notification, error: notificationError } = await (supabase as any).from("notifications").select("id").eq("id", notificationId).or(`audience.eq.all,user_id.eq.${user.id}`).maybeSingle();
+  if (notificationError) throw new Error(notificationError.message);
+  if (!notification) throw new Error("通知不存在或无权查看");
+  const acknowledgedAt = new Date().toISOString();
+  const { data, error } = await (supabase as any).from("notification_receipts").upsert({ notification_id: notificationId, user_id: user.id, acknowledged_at: acknowledgedAt }, { onConflict: "notification_id,user_id" }).select("acknowledged_at").single();
+  if (error) throw new Error(error.message);
+  return { acknowledgedAt: data.acknowledged_at };
+}
+
+export async function getAdminNotifications(env: Env, user: AuthenticatedUser) {
+  const supabase = await requireAdmin(env, user);
+  const { data, error } = await (supabase as any).from("notifications").select("id, title, body, audience, created_at, profiles!notifications_user_id_fkey(email), creator:profiles!notifications_created_by_fkey(email)").order("created_at", { ascending: false }).limit(100);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((item: any) => ({ id: item.id, title: item.title, body: item.body, audience: item.audience, acknowledgedAt: null, recipientEmail: item.profiles?.email ?? null, createdByEmail: item.creator?.email ?? "", createdAt: item.created_at }));
+}
+
+export async function createAdminNotification(env: Env, user: AuthenticatedUser, input: { title?: string; body?: string; audience?: "all" | "user"; recipient?: string }) {
+  const supabase = await requireAdmin(env, user);
+  const title = input.title?.trim() ?? "";
+  const body = input.body?.trim() ?? "";
+  if (!title || title.length > 120) throw new Error("标题长度需为 1-120 个字符");
+  if (!body || body.length > 4000) throw new Error("正文长度需为 1-4000 个字符");
+  if (input.audience !== "all" && input.audience !== "user") throw new Error("请选择发送范围");
+  let target: { id: string; email: string } | null = null;
+  if (input.audience === "user") {
+    const recipient = input.recipient?.trim() ?? "";
+    if (!recipient) throw new Error("请输入用户邮箱或 ID");
+    let query = (supabase as any).from("profiles").select("id, email");
+    query = recipient.includes("@") ? query.ilike("email", recipient) : query.eq("id", recipient);
+    const result = await query.maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data) throw new Error("未找到该用户");
+    target = result.data;
+  }
+  const { data, error } = await (supabase as any).from("notifications").insert({ title, body, audience: input.audience, user_id: target?.id ?? null, created_by: user.id }).select("id, title, body, audience, created_at").single();
+  if (error) throw new Error(error.message);
+  await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.notification.created", message: input.audience === "all" ? `管理员发布全平台公告：${title}` : `管理员向 ${target!.email} 发送通知：${title}` });
+  return { id: data.id, title: data.title, body: data.body, audience: data.audience, acknowledgedAt: null, recipientEmail: target?.email ?? null, createdByEmail: user.email, createdAt: data.created_at };
+}
+
 async function getEffectivePlanConfig(env: Env, planKey: string | null | undefined) {
   const fallback = getPlanConfig(planKey);
   const supabase = createServiceSupabase(env);
@@ -1023,6 +1085,7 @@ async function getEffectivePlanConfig(env: Env, planKey: string | null | undefin
       ...fallback.quotas,
       user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day },
       site: { ...fallback.quotas.site, maxDomainsPerSite: data.max_domains_per_site },
+      deployment: { ...fallback.quotas.deployment, maxFiles: data.max_files },
     },
     capabilities: { customDomain: data.custom_domain, passwordProtection: data.password_protection, accessAnalytics: data.access_analytics, removeBranding: data.remove_branding, rollback: data.rollback, sourceBuild: data.source_build },
   };
@@ -1139,7 +1202,7 @@ export async function deleteAdminDomainPrice(env: Env, user: AuthenticatedUser, 
   return { domain_type: type };
 }
 
-async function getUserPlan(env: Env, user: AuthenticatedUser) {
+export async function getUserPlan(env: Env, user: AuthenticatedUser) {
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
     .from("profiles")

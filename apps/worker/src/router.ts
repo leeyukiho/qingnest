@@ -22,6 +22,12 @@ function candidatePaths(pathname: string) {
     return [`${clean}index.html`];
   }
 
+  // Asset requests must never fall through to HTML candidates. Besides hiding
+  // broken assets behind the SPA shell, that can turn one miss into four R2 reads.
+  if (/\/[^/]+\.[^/]+$/.test(`/${clean}`)) {
+    return [clean];
+  }
+
   const candidates = [clean];
 
   if (!clean.endsWith(".html")) {
@@ -48,6 +54,7 @@ async function readPublicEdgeCache(request: Request) {
     const originalCacheControl = headers.get(ORIGINAL_CACHE_CONTROL_HEADER);
     headers.delete(ORIGINAL_CACHE_CONTROL_HEADER);
     if (originalCacheControl) headers.set("cache-control", originalCacheControl);
+    headers.set("x-qingnest-cache", "HIT");
 
     return new Response(request.method === "HEAD" ? null : cached.body, {
       status: cached.status,
@@ -74,6 +81,7 @@ function cachePublicResponse(
   const cacheTtl = ttlSeconds ?? (maxAge ? Number(maxAge) : platformConfig.cache.edgeTtlSeconds);
   headers.set(ORIGINAL_CACHE_CONTROL_HEADER, originalCacheControl);
   headers.set("cache-control", `public, max-age=${cacheTtl}`);
+  headers.delete("set-cookie");
 
   context.waitUntil(
     caches.default
@@ -120,17 +128,25 @@ export async function handleSiteRequest(
     return response;
   }
 
+  // A public cache hit is self-contained: no KV mapping, traffic-limit KV or R2
+  // lookup is needed. Enforcement changes converge when the short edge TTL ends.
+  const cachedResponse = previewMatch ? null : await readPublicEdgeCache(request);
+  if (cachedResponse) {
+    recordTraffic(
+      env,
+      request,
+      url.hostname,
+      cachedResponse.status,
+      Number(cachedResponse.headers.get("content-length") ?? 0),
+    );
+    return cachedResponse;
+  }
+
   if (!previewMatch && await isTrafficLimited(env, url.hostname)) {
     const response = withSecurityHeaders(problem("本站点的免费流量保护额度已用尽，站长升级套餐后可恢复访问", 429));
     response.headers.set("retry-after", "3600");
     return response;
   }
-
-  const cachedResponse = previewMatch ? null : await readPublicEdgeCache(request);
-    if (cachedResponse) {
-      recordTraffic(env, url.hostname, cachedResponse.status, Number(cachedResponse.headers.get("content-length") ?? 0));
-      return cachedResponse;
-    }
 
   const mapping = previewMatch
     ? await getPreviewMapping(env, previewMatch[1])
@@ -176,13 +192,16 @@ export async function handleSiteRequest(
       object.writeHttpMetadata(headers);
       headers.set("content-type", getContentType(path));
       headers.set("cache-control", getCacheControl(path));
+      headers.set("content-length", String(object.size));
+      headers.set("etag", object.httpEtag);
+      headers.set("x-qingnest-cache", "MISS");
 
       for (const [key, value] of Object.entries(platformConfig.securityHeaders)) {
         headers.set(key, value);
       }
 
       const response = new Response(request.method === "HEAD" ? null : object.body, { headers });
-      recordTraffic(env, url.hostname, 200, object.size);
+      recordTraffic(env, request, url.hostname, 200, object.size);
       if (!previewMatch) cachePublicResponse(request, response, context);
       return response;
     }
@@ -196,13 +215,16 @@ export async function handleSiteRequest(
       object.writeHttpMetadata(headers);
       headers.set("content-type", platformConfig.mimeTypes[".html"]);
       headers.set("cache-control", platformConfig.cache.html);
+      headers.set("content-length", String(object.size));
+      headers.set("etag", object.httpEtag);
+      headers.set("x-qingnest-cache", "MISS");
 
       for (const [key, value] of Object.entries(platformConfig.securityHeaders)) {
         headers.set(key, value);
       }
 
       const response = new Response(request.method === "HEAD" ? null : object.body, { headers });
-      recordTraffic(env, url.hostname, 200, object.size);
+      recordTraffic(env, request, url.hostname, 200, object.size);
       if (!previewMatch) cachePublicResponse(request, response, context);
       return response;
     }

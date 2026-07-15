@@ -82,6 +82,10 @@ export const platformConfigSchema = z.object({
     freeProtectionHours: z.number().int().positive(),
     paidProtectionHours: z.number().int().positive(),
     maxPagesProjects: z.number().int().positive(),
+    immediatePagesFileThreshold: z.number().int().positive(),
+    replacementScoreRatio: z.number().positive(),
+    minimumPagesResidenceMinutes: z.number().int().nonnegative(),
+    planScoreWeights: z.record(z.number().positive()),
     maxDirectUploadBytes: z.number().int().positive(),
     maxPagesFileBytes: z.number().int().positive(),
     maxPagesFiles: z.number().int().positive()
