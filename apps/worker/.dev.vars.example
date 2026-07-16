@@ -15,5 +15,6 @@ FM_SECRET=replace-with-fm-secret
 FM_PAY_TYPE=aloop
 FM_NOTIFY_URL=https://api.example.com/api/payments/fm/notify
 FM_RETURN_URL=https://app.example.com/studio/billing/payment-result
-FM_PAY_URL_HOSTS=replace-with-fm-api-host
+# 可选安全加固；不配置时接受 FM 通过 HTTPS 返回的支付链接。
+FM_PAY_URL_HOSTS=
 FM_QUERY_ENABLED=false

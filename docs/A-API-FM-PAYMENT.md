@@ -149,7 +149,8 @@ FM_SECRET=
 FM_PAY_TYPE=aloop
 FM_NOTIFY_URL=https://<api-domain>/api/payments/fm/notify
 FM_RETURN_URL=https://<web-domain>/studio/billing/payment-result
-FM_PAY_URL_HOSTS=<FM 支付页域名，多个用逗号分隔>
+# 可选；仅在需要额外限制支付页域名时配置
+FM_PAY_URL_HOSTS=
 FM_QUERY_ENABLED=false
 ```
 

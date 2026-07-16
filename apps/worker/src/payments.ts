@@ -135,8 +135,11 @@ async function createFmPayment(env: Env, order: OrderRow) {
   const payUrl = new URL(payload.data.payUrl);
   if (!['http:', 'https:'].includes(payUrl.protocol)) throw new Error("FM 返回了无效支付地址");
   if (env.ENVIRONMENT === "production" && payUrl.protocol !== "https:") throw new Error("FM 返回的支付地址不是 HTTPS");
-  const allowedHosts = new Set([new URL(config.apiBaseUrl).hostname, ...(env.FM_PAY_URL_HOSTS ?? "").split(",").map((item) => item.trim()).filter(Boolean)]);
-  if (!allowedHosts.has(payUrl.hostname)) throw new Error("FM 返回了未授权的支付域名");
+  const configuredPayHosts = (env.FM_PAY_URL_HOSTS ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  const allowedHosts = new Set([new URL(config.apiBaseUrl).hostname, ...configuredPayHosts]);
+  if (configuredPayHosts.length > 0 && !allowedHosts.has(payUrl.hostname)) {
+    throw new Error(`FM 返回了未授权的支付域名：${payUrl.hostname}。请将该主机名加入 FM_PAY_URL_HOSTS`);
+  }
 
   const supabase = createServiceSupabase(env);
   const { error } = await supabase.from("orders").update({
