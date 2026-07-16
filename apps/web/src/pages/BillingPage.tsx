@@ -1,4 +1,5 @@
-import { ArrowRight, CreditCard, FileText, ReceiptText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, CreditCard, FileText, Loader2, ReceiptText } from "lucide-react";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { formatBytes } from "@/app/deployment-view";
@@ -11,7 +12,13 @@ import {
   STUDIO_SECTION_CLASS,
   STUDIO_TITLE_CLASS,
 } from "@/app/ui";
-import type { AccountProfile } from "@/lib/api";
+import { getOrders, type AccountProfile, type PaymentOrder } from "@/lib/api";
+
+const orderStatus: Record<PaymentOrder["status"], string> = {
+  pending: "等待支付", payment_failed: "创建支付失败", paid: "已到账", fulfilling: "正在开通",
+  fulfilled: "已完成", fulfillment_failed: "开通失败，客服处理中", expired: "已超时",
+  refund_pending: "退款处理中", refunded: "已退款", cancelled: "已取消",
+};
 
 function percentage(current: number, limit: number) {
   if (limit <= 0) return 0;
@@ -27,6 +34,14 @@ export function BillingPage({
 }) {
   const plan = account?.planConfig ?? getPlanConfig(account?.plan);
   const usage = account?.usage;
+  const [orders, setOrders] = useState<PaymentOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
+  useEffect(() => {
+    let active = true;
+    getOrders().then((data) => { if (active) setOrders(data); }).catch((cause) => { if (active) setOrdersError(cause instanceof Error ? cause.message : "订单加载失败"); }).finally(() => { if (active) setOrdersLoading(false); });
+    return () => { active = false; };
+  }, []);
   const quotaItems: Array<{ label: string; current: number; limit: number; unit?: string; formatted?: boolean }> = [
     { label: "项目", current: usage?.sites ?? 0, limit: plan.quotas.user.maxSites, unit: "个" },
     { label: "公开站点", current: usage?.publicSites ?? 0, limit: plan.quotas.user.maxPublicSites, unit: "个" },
@@ -98,16 +113,19 @@ export function BillingPage({
                     <p className="mt-1 text-xs text-zinc-500">套餐与域名购买记录</p>
                   </div>
                 </div>
-                <span className="text-xs text-zinc-600">共 0 笔</span>
+                <span className="text-xs text-zinc-600">共 {orders.length} 笔</span>
               </div>
-              <div className="flex min-h-56 flex-col items-center justify-center px-4 text-center">
+              {ordersLoading ? <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />正在读取订单</div> : null}
+              {ordersError ? <p className="py-8 text-sm text-red-300">{ordersError}</p> : null}
+              {!ordersLoading && !ordersError && orders.length ? <div className="divide-y divide-white/10">{orders.map((order) => <article className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_8rem_9rem] sm:items-center" key={order.id}><div><p className="text-sm font-medium text-zinc-200">{order.productName}</p><p className="mt-1 text-xs text-zinc-600">{order.orderNo} · {new Date(order.createdAt).toLocaleString("zh-CN")}</p>{order.failureMessage ? <p className="mt-1 text-xs text-amber-300">{order.failureMessage}</p> : null}</div><div className="text-sm tabular-nums text-zinc-300">¥{(order.amountCents / 100).toFixed(2)}{order.actualAmountCents !== null && order.actualAmountCents !== order.amountCents ? <span className="block text-xs text-zinc-600">实付 ¥{(order.actualAmountCents / 100).toFixed(2)}</span> : null}</div><span className="text-sm text-zinc-400 sm:text-right">{orderStatus[order.status]}</span></article>)}</div> : null}
+              {!ordersLoading && !ordersError && !orders.length ? <div className="flex min-h-56 flex-col items-center justify-center px-4 text-center">
                 <span className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/[0.03]"><FileText className="h-5 w-5 text-zinc-500" aria-hidden="true" /></span>
                 <p className="mt-4 text-sm font-medium text-zinc-300">暂无订单</p>
                 <p className="mt-1 text-xs text-zinc-600">订单功能上线后，付款记录和状态会显示在这里。</p>
                 <button className="mt-4 inline-flex h-9 items-center gap-2 text-sm font-medium text-zinc-300 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60" onClick={() => onNavigate(STUDIO_DOMAIN_PURCHASE_PATH)} type="button">
                   浏览可租赁域名 <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </button>
-              </div>
+              </div> : null}
             </section>
           </main>
         </div>

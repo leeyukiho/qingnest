@@ -5,6 +5,7 @@ import type { Env } from "./types";
 import { runTrafficLifecycle } from "./traffic";
 import { evaluateCapacityAlerts } from "./capacity";
 import { syncPlatformDomains } from "./platform-domains";
+import { runPaymentLifecycle } from "./payments";
 
 export default {
   async fetch(
@@ -27,6 +28,7 @@ export default {
       runTrafficLifecycle(env),
       capacityDue ? evaluateCapacityAlerts(env) : Promise.resolve(),
       syncPlatformDomains(env),
+      runPaymentLifecycle(env),
     ]));
   },
 };

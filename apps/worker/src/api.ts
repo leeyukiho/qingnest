@@ -23,7 +23,6 @@ import {
   getUserPlan,
   listProjects,
   listPublicSlots,
-  rentPublicSlot,
   listPlatformDomainCatalog,
   listPublicPlans,
   switchPublicSlot,
@@ -43,17 +42,32 @@ import {
   getNotifications,
   updateProjectName,
   signUpWithEmailPassword,
+  assertAdmin,
 } from "./state";
 import { hasServiceSupabase } from "./supabase";
 import type { Env } from "./types";
 import { getCapacityDashboard, updateCapacitySettings } from "./capacity";
+import {
+  createDomainCheckout,
+  createDomainRenewalCheckout,
+  createPlanCheckout,
+  getUserOrder,
+  getUserOrderByNumber,
+  getDomainRenewalEligibility,
+  handleFmNotification,
+  listAdminOrders,
+  listUserOrders,
+  reconcileOrder,
+  recordAdminRefund,
+  replaceFailedDomain,
+  retryOrderFulfillment,
+} from "./payments";
 
 type SiteCreateInput = {
   name?: string;
 };
 
 type PublicSlotInput = { siteId?: string; subdomain?: string };
-type PublicSlotRentalInput = { subdomain?: string; hostnameSuffix?: string; durationMonths?: 1 | 3 | 6 | 12 };
 type PublicSlotUpdateInput = { siteId?: string | null };
 
 type SiteUpdateInput = { name?: string };
@@ -73,6 +87,7 @@ type AdminUserUpdateInput = { role?: "user" | "admin"; plan?: string };
 type AdminSiteUpdateInput = { status?: "draft" | "active" | "pending_review" | "blocked" };
 type AdminDomainInput = { userId?: string; hostname?: string; type?: "platform_subdomain" | "custom_domain"; siteId?: string | null };
 type AdminNotificationInput = { title?: string; body?: string; audience?: "all" | "user"; recipient?: string };
+type CheckoutInput = { durationMonths?: 1 | 3 | 6 | 12 };
 
 const subdomainCheckWindows = new Map<
   string,
@@ -149,6 +164,16 @@ export async function handleApi(request: Request, env: Env) {
   const platformConfig = getWorkerPlatformConfig(env);
 
   try {
+    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/payments/fm/notify") {
+      try {
+        await handleFmNotification(request, env);
+        return new Response("success", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+      } catch (cause) {
+        console.warn("FM notification rejected", cause instanceof Error ? cause.message : "unknown error");
+        return new Response("fail", { status: 400, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/api/health") {
       return json({
         service: "worker-api",
@@ -172,6 +197,52 @@ export async function handleApi(request: Request, env: Env) {
       return json(await listPublicPlans(env), {
         headers: { "cache-control": "public, max-age=300, s-maxage=21600, stale-while-revalidate=86400" },
       });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/orders/plan") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<CheckoutInput & { planKey?: string }>(request);
+      if (!input.planKey || !input.durationMonths) return problem("请选择套餐和购买周期", 400);
+      return json(await createPlanCheckout(env, user, input.planKey, input.durationMonths), { status: 201 });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/orders/domain") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<CheckoutInput & { hostname?: string; hostnameSuffix?: string }>(request);
+      if (!input.hostname || !input.hostnameSuffix || !input.durationMonths) return problem("请选择域名和租赁周期", 400);
+      return json(await createDomainCheckout(env, user, input.hostname, input.hostnameSuffix, input.durationMonths), { status: 201 });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/orders/domain-renewal") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<CheckoutInput & { domainId?: string }>(request);
+      if (!input.domainId || !input.durationMonths) return problem("请选择域名和续费周期", 400);
+      return json(await createDomainRenewalCheckout(env, user, input.domainId, input.durationMonths), { status: 201 });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/orders") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const requestedOrderNo = url.searchParams.get("orderNo");
+      if (requestedOrderNo) return json(await getUserOrderByNumber(env, user, requestedOrderNo));
+      return json(await listUserOrders(env, user));
+    }
+
+    const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
+    if (request.method === "GET" && orderMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await getUserOrder(env, user, decodeURIComponent(orderMatch[1] ?? "")));
+    }
+
+    const renewalEligibilityMatch = url.pathname.match(/^\/api\/domains\/([^/]+)\/renewal-eligibility$/);
+    if (request.method === "GET" && renewalEligibilityMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await getDomainRenewalEligibility(env, user, decodeURIComponent(renewalEligibilityMatch[1] ?? "")));
     }
 
     if (request.method === "POST" && url.pathname === "/api/auth/sign-up") {
@@ -201,6 +272,30 @@ export async function handleApi(request: Request, env: Env) {
       }
 
       return json(await getAdminOverview(env, user));
+    }
+    if (request.method === "GET" && url.pathname === "/api/admin/orders") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      await assertAdmin(env, user);
+      return json(await listAdminOrders(env));
+    }
+    const adminOrderActionMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)\/(reconcile|retry|replace-domain|refund)$/);
+    if (request.method === "POST" && adminOrderActionMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      await assertAdmin(env, user);
+      const id = decodeURIComponent(adminOrderActionMatch[1] ?? "");
+      const action = adminOrderActionMatch[2];
+      if (action === "reconcile") return json(await reconcileOrder(env, id));
+      if (action === "retry") return json(await retryOrderFulfillment(env, id));
+      if (action === "replace-domain") {
+        const input = await readJson<{ hostname?: string }>(request);
+        if (!input.hostname) return problem("请输入替换域名", 400);
+        return json(await replaceFailedDomain(env, id, input.hostname));
+      }
+      const input = await readJson<{ reason?: string; channelReference?: string }>(request);
+      if (!input.reason || !input.channelReference) return problem("请填写退款原因和支付宝退款凭证", 400);
+      return json(await recordAdminRefund(env, user, id, { reason: input.reason, channelReference: input.channelReference }));
     }
     if (url.pathname === "/api/admin/capacity" && request.method === "GET") {
       const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
@@ -396,19 +491,7 @@ export async function handleApi(request: Request, env: Env) {
       request.method === "POST" &&
       url.pathname === "/api/public-slots/rent"
     ) {
-      const input = await readJson<PublicSlotRentalInput>(request);
-      if (!input.subdomain) return problem("请输入地址前缀", 400);
-      const user = await maybeGetUser(request, env);
-      if (!user) return problem("请先登录", 401);
-      return json(
-        await rentPublicSlot(env, {
-          subdomain: input.subdomain,
-          hostnameSuffix: input.hostnameSuffix,
-          durationMonths: input.durationMonths,
-          user,
-        }),
-        { status: 201 },
-      );
+      return problem("域名租赁必须先完成支付宝支付", 410);
     }
 
     const slotMatch = url.pathname.match(/^\/api\/public-slots\/([^/]+)$/);

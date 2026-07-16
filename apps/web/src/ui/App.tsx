@@ -17,6 +17,7 @@ import {
   PRICING_PATH,
   STUDIO_ADMIN_PATH,
   STUDIO_BILLING_PATH,
+  STUDIO_PAYMENT_RESULT_PATH,
   STUDIO_DOMAIN_PURCHASE_PATH,
   STUDIO_DOMAINS_PATH,
   STUDIO_MY_DOMAINS_PATH,
@@ -38,6 +39,7 @@ import { DomainPurchasePage } from "@/pages/DomainPurchasePage";
 import { BillingPage } from "@/pages/BillingPage";
 import { NotificationsPage } from "@/pages/NotificationsPage";
 import { PricingPage } from "@/pages/PricingPage";
+import { PaymentResultPage } from "@/pages/PaymentResultPage";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { ToastProvider } from "@/app/toast";
@@ -73,7 +75,7 @@ export function App() {
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
-  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_MY_DOMAINS_PATH ? "domain-management" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
+  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH || pathname === STUDIO_PAYMENT_RESULT_PATH ? "billing" : pathname === STUDIO_MY_DOMAINS_PATH ? "domain-management" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
   const matchingCachedAccount = session && cachedSidebarAccount?.id === session.user.id ? cachedSidebarAccount : null;
   const silentGateAccount = account ?? matchingCachedAccount ?? (session ? {
     id: session.user.id,
@@ -354,6 +356,8 @@ export function App() {
     routeContent = <DomainPurchasePage account={account} onNavigate={navigate} />;
   } else if (pathname === STUDIO_BILLING_PATH) {
     routeContent = <BillingPage account={account} onNavigate={navigate} />;
+  } else if (pathname === STUDIO_PAYMENT_RESULT_PATH) {
+    routeContent = <PaymentResultPage account={account} onNavigate={navigate} search={location.search} />;
   } else if (pathname === STUDIO_MY_DOMAINS_PATH) {
     routeContent = <DomainsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else if (pathname === STUDIO_NOTIFICATIONS_PATH) {

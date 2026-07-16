@@ -252,9 +252,39 @@ export type Database = {
         Relationships: EmptyRelationships;
       };
       domain_pricing: {
-        Row: { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
-        Insert: { domain_type: string; label: string; hostname_suffix: string; price_cents?: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents?: number; quarterly_price_cents?: number; semiannual_price_cents?: number; annual_price_cents?: number; enabled?: boolean; cloudflare_zone_id?: string | null; cloudflare_zone_status?: string | null; cloudflare_nameservers?: string[]; cloudflare_dns_record_id?: string | null; cloudflare_worker_route_id?: string | null; setup_status?: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error?: string | null; last_checked_at?: string | null; next_check_at?: string | null; updated_at?: string };
+        Row: { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; renewal_window_days: number; max_advance_months: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
+        Insert: { domain_type: string; label: string; hostname_suffix: string; price_cents?: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents?: number; quarterly_price_cents?: number; semiannual_price_cents?: number; annual_price_cents?: number; renewal_window_days?: number; max_advance_months?: number; enabled?: boolean; cloudflare_zone_id?: string | null; cloudflare_zone_status?: string | null; cloudflare_nameservers?: string[]; cloudflare_dns_record_id?: string | null; cloudflare_worker_route_id?: string | null; setup_status?: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error?: string | null; last_checked_at?: string | null; next_check_at?: string | null; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["domain_pricing"]["Insert"]>;
+        Relationships: EmptyRelationships;
+      };
+      orders: {
+        Row: { id: string; order_no: string; user_id: string; type: "plan_subscription" | "domain_rental" | "domain_renewal"; status: "pending" | "payment_failed" | "paid" | "fulfilling" | "fulfilled" | "fulfillment_failed" | "expired" | "refund_pending" | "refunded" | "cancelled"; currency: "CNY"; amount_cents: number; product_key: string; product_name: string; product_snapshot: Json; provider: "fm"; provider_order_id: string | null; pay_url: string | null; expires_at: string; paid_at: string | null; fulfilled_at: string | null; failure_code: string | null; failure_message: string | null; created_at: string; updated_at: string };
+        Insert: { id?: string; order_no: string; user_id: string; type: "plan_subscription" | "domain_rental" | "domain_renewal"; status?: Database["public"]["Tables"]["orders"]["Row"]["status"]; currency?: "CNY"; amount_cents: number; product_key: string; product_name: string; product_snapshot: Json; provider?: "fm"; provider_order_id?: string | null; pay_url?: string | null; expires_at: string; paid_at?: string | null; fulfilled_at?: string | null; failure_code?: string | null; failure_message?: string | null; created_at?: string; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["orders"]["Insert"]>;
+        Relationships: EmptyRelationships;
+      };
+      payments: {
+        Row: { id: string; order_id: string; provider: "fm"; provider_order_id: string; channel_order_no: string | null; status: "success" | "refunded"; amount_cents: number; actual_amount_cents: number; pay_type: string; payee: string | null; paid_at: string; signature_valid: boolean; source: "notify" | "query" | "admin"; raw_payload: Json; received_at: string };
+        Insert: Omit<Database["public"]["Tables"]["payments"]["Row"], "id" | "received_at"> & { id?: string; received_at?: string };
+        Update: Partial<Database["public"]["Tables"]["payments"]["Insert"]>;
+        Relationships: EmptyRelationships;
+      };
+      domain_reservations: {
+        Row: { id: string; order_id: string; user_id: string; hostname: string; status: "active" | "converted" | "released"; expires_at: string; created_at: string; updated_at: string };
+        Insert: Omit<Database["public"]["Tables"]["domain_reservations"]["Row"], "id" | "created_at" | "updated_at"> & { id?: string; created_at?: string; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["domain_reservations"]["Insert"]>;
+        Relationships: EmptyRelationships;
+      };
+      fulfillment_jobs: {
+        Row: { id: string; order_id: string; type: "plan_subscription" | "domain_rental" | "domain_renewal"; status: "pending" | "processing" | "completed" | "failed"; attempts: number; last_error: string | null; next_attempt_at: string | null; created_at: string; completed_at: string | null; updated_at: string };
+        Insert: { id?: string; order_id: string; type: Database["public"]["Tables"]["fulfillment_jobs"]["Row"]["type"]; status?: Database["public"]["Tables"]["fulfillment_jobs"]["Row"]["status"]; attempts?: number; last_error?: string | null; next_attempt_at?: string | null; created_at?: string; completed_at?: string | null; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["fulfillment_jobs"]["Insert"]>;
+        Relationships: EmptyRelationships;
+      };
+      refunds: {
+        Row: { id: string; order_id: string; amount_cents: number; status: "pending" | "completed" | "rejected"; reason: string; channel_reference: string | null; operator_id: string | null; created_at: string; completed_at: string | null };
+        Insert: Omit<Database["public"]["Tables"]["refunds"]["Row"], "id" | "created_at"> & { id?: string; created_at?: string };
+        Update: Partial<Database["public"]["Tables"]["refunds"]["Insert"]>;
         Relationships: EmptyRelationships;
       };
     };
@@ -275,6 +305,11 @@ export type Database = {
           expires_at: string;
         }[];
       };
+      create_plan_payment_order: { Args: { p_user_id: string; p_order_no: string; p_plan_key: string; p_duration_months: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["orders"]["Row"] };
+      create_domain_payment_order: { Args: { p_user_id: string; p_order_no: string; p_hostname: string; p_hostname_suffix: string; p_duration_months: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["orders"]["Row"] };
+      create_domain_renewal_order: { Args: { p_user_id: string; p_order_no: string; p_domain_id: string; p_duration_months: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["orders"]["Row"] };
+      confirm_fm_payment: { Args: { p_order_no: string; p_provider_order_id: string; p_channel_order_no: string; p_amount_cents: number; p_actual_amount_cents: number; p_pay_type: string; p_payee: string; p_paid_at: string; p_source: "notify" | "query" | "admin"; p_raw_payload: Json }; Returns: Json };
+      record_order_refund: { Args: { p_order_id: string; p_operator_id: string; p_reason: string; p_channel_reference: string }; Returns: Json };
     };
     CompositeTypes: Record<string, never>;
   };

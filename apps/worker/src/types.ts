@@ -18,6 +18,14 @@ export type Env = {
   CLOUDFLARE_WORKER_SCRIPT?: string;
   CLOUDFLARE_R2_BUCKET_NAME?: string;
   CLOUDFLARE_KV_NAMESPACE_ID?: string;
+  FM_API_BASE_URL?: string;
+  FM_MERCHANT_NUM?: string;
+  FM_SECRET?: string;
+  FM_PAY_TYPE?: "aloop";
+  FM_NOTIFY_URL?: string;
+  FM_RETURN_URL?: string;
+  FM_QUERY_ENABLED?: string;
+  FM_PAY_URL_HOSTS?: string;
 };
 
 export type ApiResponse<T> = {

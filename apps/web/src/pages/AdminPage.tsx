@@ -8,11 +8,11 @@ import { STUDIO_PATH } from "@/app/navigation";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_EYEBROW_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
-import { checkSubdomain, createAdminDomain, createAdminDomainPrice, createAdminNotification, createAdminPrivatePreview, deleteAdminDomain, deleteAdminDomainPrice, getAdminCapacity, getAdminNotifications, getAdminOverview, syncAdminDomainPrice, updateAdminCapacity, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminNotification, type AdminOverview, type AdminPlan, type CapacityDashboard, type CapacityMetricKey } from "@/lib/api";
+import { checkSubdomain, createAdminDomain, createAdminDomainPrice, createAdminNotification, createAdminPrivatePreview, deleteAdminDomain, deleteAdminDomainPrice, getAdminCapacity, getAdminNotifications, getAdminOrders, getAdminOverview, reconcileAdminOrder, refundAdminOrder, replaceAdminOrderDomain, retryAdminOrder, syncAdminDomainPrice, updateAdminCapacity, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminNotification, type AdminOverview, type AdminPaymentOrder, type AdminPlan, type CapacityDashboard, type CapacityMetricKey } from "@/lib/api";
 import { clientPlatformConfig } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
-type AdminTab = "overview" | "capacity" | "users" | "projects" | "domains" | "plans" | "benefits" | "notifications" | "reviews" | "audit";
+type AdminTab = "overview" | "capacity" | "users" | "projects" | "domains" | "orders" | "plans" | "benefits" | "notifications" | "reviews" | "audit";
 type PendingAction = {
   title: string;
   description: string;
@@ -27,6 +27,7 @@ const tabs = [
   ["users", "用户", Users],
   ["projects", "项目", FolderKanban],
   ["domains", "域名", Globe2],
+  ["orders", "订单", CircleDollarSign],
   ["plans", "套餐", CircleDollarSign],
   ["benefits", "权益", WalletCards],
   ["notifications", "通知", Bell],
@@ -345,6 +346,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
               </>
             ) : null}
             {overview && tab === "domains" ? <DomainsPanel data={overview} domainForm={domainForm} priceDrafts={priceDrafts} setDomainForm={setDomainForm} setPriceDrafts={setPriceDrafts} usersById={usersById} confirm={confirm} changeStatus={changeStatus} /> : null}
+            {overview && tab === "orders" ? <OrdersPanel /> : null}
             {overview && tab === "plans" ? <PlansPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
             {overview && tab === "benefits" ? <BenefitsPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
             {overview && tab === "notifications" ? <NotificationsPanel users={overview.recentUsers} /> : null}
@@ -383,6 +385,46 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
       </section>
     </div>
   );
+}
+
+function OrdersPanel() {
+  const [orders, setOrders] = useState<AdminPaymentOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setOrders(await getAdminOrders()); setError(null); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "订单加载失败"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const run = async (order: AdminPaymentOrder, action: "reconcile" | "retry" | "replace" | "refund") => {
+    setBusyId(order.id);
+    setError(null);
+    try {
+      if (action === "reconcile") await reconcileAdminOrder(order.id);
+      if (action === "retry") await retryAdminOrder(order.id);
+      if (action === "replace") {
+        const hostname = window.prompt("输入同后缀的替换域名", order.product_name);
+        if (!hostname) return;
+        await replaceAdminOrderDomain(order.id, hostname);
+      }
+      if (action === "refund") {
+        const reason = window.prompt("输入退款原因");
+        if (!reason) return;
+        const reference = window.prompt("输入支付宝退款凭证号");
+        if (!reference) return;
+        await refundAdminOrder(order.id, reason, reference);
+      }
+      await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "订单操作失败"); }
+    finally { setBusyId(null); }
+  };
+
+  if (loading && !orders.length) return <div className="mt-10 flex justify-center gap-2 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />正在读取支付订单</div>;
+  return <div className="mt-5"><ToastMessage message={error} /><div className="mb-3 flex justify-end"><button className={STUDIO_SECONDARY_BUTTON_CLASS} disabled={loading} onClick={() => void load()} type="button"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />刷新订单</button></div><DataTable headers={["订单 / 商品", "用户", "金额", "状态", "时间", "操作"]}>{orders.map((order) => <tr className="border-b border-white/10 last:border-0" key={order.id}><Cell><span className="text-zinc-200">{order.product_name}</span><span className="block text-xs text-zinc-600">{order.order_no}</span>{order.failure_message ? <span className="mt-1 block max-w-72 text-xs text-amber-300">{order.failure_message}</span> : null}</Cell><Cell><span className="text-xs text-zinc-500">{order.user_id}</span></Cell><Cell>{money(order.amount_cents)}</Cell><Cell><StatusBadge status={order.status} /></Cell><Cell>{dateTime(order.created_at)}</Cell><Cell><div className="flex min-w-[15rem] flex-wrap gap-1"><button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "reconcile")} type="button">对账</button>{order.status === "fulfillment_failed" ? <><button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "retry")} type="button">重试交付</button>{order.type === "domain_rental" ? <button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "replace")} type="button">改派域名</button> : null}</> : null}{order.paid_at && order.status !== "refunded" ? <button className={dangerButton} disabled={busyId !== null} onClick={() => void run(order, "refund")} type="button">登记退款</button> : null}</div></Cell></tr>)}</DataTable></div>;
 }
 
 function Overview({ data }: { data: AdminOverview }) {
@@ -1141,6 +1183,8 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                       quarterly_price_cents: Math.round(Number(newPrices.quarterly) * 100),
                       semiannual_price_cents: Math.round(Number(newPrices.semiannual) * 100),
                       annual_price_cents: Math.round(Number(newPrices.annual) * 100),
+                      renewal_window_days: 30,
+                      max_advance_months: 12,
                       enabled: true,
                     });
                     setNewSuffix("");
@@ -1188,6 +1232,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                     </Cell>
                     <Cell>
                       <div className="grid grid-cols-4 gap-2">{(['monthly', 'quarterly', 'semiannual', 'annual'] as const).map((period) => <ClearableInput aria-label={`${draft.hostname_suffix} ${period}价格`} inputMode="decimal" key={period} onChange={(e) => setPriceValues((all) => ({ ...all, [`${draft.domain_type}:${period}`]: e.target.value }))} value={priceValues[`${draft.domain_type}:${period}`] ?? ""} />)}</div>
+                      <div className="mt-2 grid grid-cols-2 gap-2"><label className="text-xs text-zinc-500">到期前开放续费（天）<ClearableInput aria-label={`${draft.hostname_suffix} 续费窗口天数`} inputMode="numeric" max={365} min={1} onChange={(e) => setPriceDrafts((all) => ({ ...all, [draft.domain_type]: { ...draft, renewal_window_days: Number(e.target.value) } }))} value={draft.renewal_window_days} /></label><label className="text-xs text-zinc-500">最长提前持有（月）<ClearableInput aria-label={`${draft.hostname_suffix} 最长提前持有月数`} inputMode="numeric" max={36} min={1} onChange={(e) => setPriceDrafts((all) => ({ ...all, [draft.domain_type]: { ...draft, max_advance_months: Number(e.target.value) } }))} value={draft.max_advance_months} /></label></div>
                       <FieldError message={fieldErrors[draft.domain_type]} />
                     </Cell>
                     <Cell>
@@ -1246,6 +1291,8 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                                 quarterly_price_cents: Math.round(Number(values.quarterly) * 100),
                                 semiannual_price_cents: Math.round(Number(values.semiannual) * 100),
                                 annual_price_cents: Math.round(Number(values.annual) * 100),
+                                renewal_window_days: draft.renewal_window_days,
+                                max_advance_months: draft.max_advance_months,
                               }),
                           });
                         }}

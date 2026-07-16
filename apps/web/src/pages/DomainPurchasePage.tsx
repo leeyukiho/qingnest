@@ -20,7 +20,7 @@ import {
 import {
   checkSubdomain,
   getPlatformDomainCatalog,
-  rentPublicSlot,
+  createDomainPayment,
   type AccountProfile,
   type PlatformDomainOption,
   type SubdomainCheck,
@@ -104,9 +104,9 @@ export function DomainPurchasePage({
     if (!availability.available) return;
     setPurchasing(true);
     try {
-      const slot = await rentPublicSlot(availability.normalized, selectedSuffix, durationMonths);
-      showToast(`${slot.hostname} 已添加到你的域名`, "success");
-      onNavigate(STUDIO_MY_DOMAINS_PATH);
+      const checkout = await createDomainPayment(`${availability.normalized}.${selectedSuffix}`, selectedSuffix, durationMonths);
+      sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo);
+      window.location.assign(checkout.payUrl);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "租赁失败";
       showToast(message, "error");
@@ -239,7 +239,7 @@ export function DomainPurchasePage({
                   {prefix.trim() ? `${prefix.trim()}.${displayHostname(selectedSuffix)}` : `你的前缀.${displayHostname(selectedSuffix)}`}
                 </p>
                 <p className="mt-3 text-sm leading-6 text-zinc-500">
-                  当前未接入在线支付，本次确认不会扣款。地址会先保留在账户中，之后可绑定项目。
+                  点击后将直接进入支付宝支付。请严格按支付页面显示金额付款，订单到账后自动保留地址。
                 </p>
                 <div className="mt-4 flex items-baseline justify-between border-t border-white/10 pt-4">
                   <span className="text-xs text-zinc-500">{selectedDuration.label} · {durationMonths} 个月</span>
@@ -247,12 +247,12 @@ export function DomainPurchasePage({
                 </div>
                 <button
                   className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white bg-white px-4 text-sm font-semibold text-black transition-[border-color,opacity] hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!localValidation?.ok || checking || purchasing}
+                  disabled={!localValidation?.ok || checking || purchasing || selectedPrice < 100}
                   onClick={() => void handlePurchase()}
                   type="button"
                 >
                   {checking || purchasing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                  {checking ? "正在检查" : purchasing ? "正在保留" : "确认租赁"}
+                  {checking ? "正在检查" : purchasing ? "正在创建支付宝订单" : selectedPrice < 100 ? "金额低于支付宝最低限额" : "支付宝支付"}
                 </button>
                 <button
                   className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white/20 bg-black px-4 text-sm font-semibold text-zinc-200 transition-[border-color] hover:border-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"

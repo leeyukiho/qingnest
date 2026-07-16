@@ -1073,6 +1073,10 @@ async function requireAdmin(env: Env, user: AuthenticatedUser) {
   return createServiceSupabase(env);
 }
 
+export async function assertAdmin(env: Env, user: AuthenticatedUser) {
+  await requireAdmin(env, user);
+}
+
 export type NotificationItem = {
   id: string;
   title: string;
@@ -1262,6 +1266,8 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
     quarterly_price_cents: update.quarterly_price_cents,
     semiannual_price_cents: update.semiannual_price_cents,
     annual_price_cents: update.annual_price_cents,
+    renewal_window_days: update.renewal_window_days,
+    max_advance_months: update.max_advance_months,
     enabled: update.enabled,
     updated_at: new Date().toISOString(),
   };

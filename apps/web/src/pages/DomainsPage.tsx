@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   ChevronDown,
+  CalendarClock,
   ExternalLink,
   FolderKanban,
   Globe2,
@@ -33,6 +34,8 @@ import {
   listProjects,
   listPublicSlots,
   switchPublicSlot,
+  createDomainRenewalPayment,
+  getDomainRenewalEligibility,
   type AccountProfile,
   type ProjectSummary,
   type PublicSlot,
@@ -73,6 +76,10 @@ export function DomainsPage({
   } | null>(null);
   const [domainQuery, setDomainQuery] = useState("");
   const [suffixFilter, setSuffixFilter] = useState("all");
+  const [renewingSlot, setRenewingSlot] = useState<PublicSlot | null>(null);
+  const [renewalDurations, setRenewalDurations] = useState<Array<1 | 3 | 6 | 12>>([]);
+  const [renewalDuration, setRenewalDuration] = useState<1 | 3 | 6 | 12>(1);
+  const [renewalBusy, setRenewalBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -128,6 +135,39 @@ export function DomainsPage({
       setError(cause instanceof Error ? cause.message : "域名绑定失败");
     } finally {
       setBindingSlotId(null);
+    }
+  }
+
+  async function beginRenewal(slot: PublicSlot) {
+    setRenewalBusy(slot.id);
+    setError(null);
+    try {
+      const eligibility = await getDomainRenewalEligibility(slot.id);
+      if (!eligibility.eligible || !eligibility.allowedDurations.length) {
+        setError(eligibility.reason || "当前不能续费");
+        return;
+      }
+      setRenewalDurations(eligibility.allowedDurations);
+      setRenewalDuration(eligibility.allowedDurations[0]);
+      setRenewingSlot(slot);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "续费资格检查失败");
+    } finally {
+      setRenewalBusy(null);
+    }
+  }
+
+  async function payRenewal() {
+    if (!renewingSlot) return;
+    setRenewalBusy(renewingSlot.id);
+    try {
+      const checkout = await createDomainRenewalPayment(renewingSlot.id, renewalDuration);
+      sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo);
+      window.location.assign(checkout.payUrl);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "支付宝续费订单创建失败");
+      setRenewalBusy(null);
+      setRenewingSlot(null);
     }
   }
 
@@ -275,6 +315,7 @@ export function DomainsPage({
                         )}
                       </div>
                       <div className="flex flex-wrap gap-2 md:justify-end">
+                        {slot.type === "platform_subdomain" ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void beginRenewal(slot)} type="button">{renewalBusy === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}续费</button> : null}
                         <a
                           className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5"
                           href={slot.publicUrl}
@@ -301,6 +342,7 @@ export function DomainsPage({
                 </div>
               </div>
             )}
+            {renewingSlot ? <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-md border border-white/20 bg-black p-5"><h2 className="text-base font-semibold text-white">续费平台域名</h2><p className="mt-2 break-all text-sm text-zinc-400">{displayHostname(renewingSlot.hostname)}</p><p className="mt-3 text-sm leading-6 text-zinc-500">只可在后台设置的到期窗口内续费，并受最长提前持有期限限制。确认后进入支付宝。</p><div className="mt-5 grid grid-cols-4 gap-2">{renewalDurations.map((months) => <button aria-pressed={renewalDuration === months} className={`h-10 rounded-md border text-sm ${renewalDuration === months ? "border-white bg-white text-black" : "border-white/15 text-zinc-300"}`} key={months} onClick={() => setRenewalDuration(months)} type="button">{months} 个月</button>)}</div><div className="mt-6 flex justify-end gap-2"><button className="h-9 rounded-md border border-white/15 px-3 text-sm text-zinc-300" disabled={renewalBusy !== null} onClick={() => setRenewingSlot(null)} type="button">取消</button><button className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void payRenewal()} type="button">{renewalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}支付宝续费</button></div></div></div> : null}
             {editingSlot && !pendingBinding ? (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"

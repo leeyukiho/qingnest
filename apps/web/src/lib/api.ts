@@ -209,7 +209,10 @@ export type AdminOverview = {
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
 export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour: number; max_domains_per_site: number; max_site_bytes: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
 export type PublicPlan = AdminPlan;
-export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
+export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; renewal_window_days: number; max_advance_months: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
+export type PaymentOrder = { id: string; orderNo: string; type: "plan_subscription" | "domain_rental" | "domain_renewal"; status: "pending" | "payment_failed" | "paid" | "fulfilling" | "fulfilled" | "fulfillment_failed" | "expired" | "refund_pending" | "refunded" | "cancelled"; amountCents: number; actualAmountCents: number | null; productName: string; productSnapshot: unknown; expiresAt: string; paidAt: string | null; fulfilledAt: string | null; failureMessage: string | null; createdAt: string };
+export type CheckoutResult = { orderId: string; orderNo: string; payUrl: string; expiresAt: string };
+export type AdminPaymentOrder = { id: string; order_no: string; user_id: string; type: PaymentOrder["type"]; status: PaymentOrder["status"]; amount_cents: number; product_name: string; product_snapshot: unknown; provider_order_id: string | null; expires_at: string; paid_at: string | null; fulfilled_at: string | null; failure_message: string | null; created_at: string; updated_at: string };
 export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
 export type AdminNotification = NotificationItem & { recipientEmail: string | null; createdByEmail: string };
 export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "resendEmailsDaily" | "resendEmailsMonthly";
@@ -313,9 +316,14 @@ export const updateAdminDomain = (id: string, input: { status?: "active" | "pend
 export const deleteAdminDomain = (id: string) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "DELETE");
 export const updateAdminPlan = (key: string, input: Partial<AdminPlan>) => adminMutation(`/api/admin/plans/${encodeURIComponent(key)}`, "PATCH", input);
 export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], input: Partial<AdminDomainPrice>) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "PATCH", input);
-export const createAdminDomainPrice = (input: Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "enabled">) => adminMutation<AdminDomainPrice>("/api/admin/domain-pricing", "POST", input);
+export const createAdminDomainPrice = (input: Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "renewal_window_days" | "max_advance_months" | "enabled">) => adminMutation<AdminDomainPrice>("/api/admin/domain-pricing", "POST", input);
 export const deleteAdminDomainPrice = (type: string) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "DELETE");
 export const syncAdminDomainPrice = (type: string) => adminMutation<AdminDomainPrice>(`/api/admin/domain-pricing/${encodeURIComponent(type)}/sync`, "POST");
+export const getAdminOrders = () => request<AdminPaymentOrder[]>("/api/admin/orders");
+export const reconcileAdminOrder = (id: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/reconcile`, { method: "POST", body: "{}" });
+export const retryAdminOrder = (id: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/retry`, { method: "POST", body: "{}" });
+export const replaceAdminOrderDomain = (id: string, hostname: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/replace-domain`, { method: "POST", body: JSON.stringify({ hostname }) });
+export const refundAdminOrder = (id: string, reason: string, channelReference: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/refund`, { method: "POST", body: JSON.stringify({ reason, channelReference }) });
 export async function getNotifications(force = false) {
   if (!force && notificationsCache && notificationsCache.expiresAt > Date.now()) {
     return notificationsCache.data;
@@ -461,6 +469,14 @@ export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string,
   notifyAccountChanged();
   return slot;
 }
+
+export const createPlanPayment = (planKey: string, durationMonths: 1 | 3 | 6 | 12 = 1) => request<CheckoutResult>("/api/orders/plan", { method: "POST", body: JSON.stringify({ planKey, durationMonths }) });
+export const createDomainPayment = (hostname: string, hostnameSuffix: string, durationMonths: 1 | 3 | 6 | 12) => request<CheckoutResult>("/api/orders/domain", { method: "POST", body: JSON.stringify({ hostname, hostnameSuffix, durationMonths }) });
+export const createDomainRenewalPayment = (domainId: string, durationMonths: 1 | 3 | 6 | 12) => request<CheckoutResult>("/api/orders/domain-renewal", { method: "POST", body: JSON.stringify({ domainId, durationMonths }) });
+export const getOrders = () => request<PaymentOrder[]>("/api/orders");
+export const getOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`);
+export const getOrderByNumber = (orderNo: string) => request<PaymentOrder>(`/api/orders?orderNo=${encodeURIComponent(orderNo)}`);
+export const getDomainRenewalEligibility = (domainId: string) => request<{ eligible: boolean; reason: string | null; allowedDurations: Array<1 | 3 | 6 | 12>; renewalWindowDays?: number; maxAdvanceMonths?: number }>(`/api/domains/${encodeURIComponent(domainId)}/renewal-eligibility`);
 
 export async function switchPublicSlot(slotId: string, siteId: string | null) {
   const previousSiteId = publicSlotsCache?.find(

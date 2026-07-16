@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { CONTENT_TRACK_CLASS } from "@/app/ui";
 import { STUDIO_BILLING_PATH } from "@/app/navigation";
 import { formatBytes } from "@/app/deployment-view";
-import { getPublicPlans, type PublicPlan } from "@/lib/api";
+import { createPlanPayment, getPublicPlans, type PublicPlan } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const capabilityRows: Array<{ label: string; key: keyof PublicPlan }> = [
@@ -56,6 +56,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const [plans, setPlans] = useState<PublicPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [payingPlan, setPayingPlan] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -69,6 +70,20 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const recommendedKey = useMemo(() => plans.find((plan) => plan.key === "pro")?.key ?? plans.find((plan) => plan.renewal_price_cents > 0)?.key, [plans]);
   const availableProductTabs = productTabs.filter((tab) => tab.available);
   const startPath = session ? STUDIO_BILLING_PATH : "/auth?mode=sign_up";
+
+  const choosePlan = async (plan: PublicPlan) => {
+    if (!session || plan.renewal_price_cents === 0) { onNavigate(startPath); return; }
+    setPayingPlan(plan.key);
+    setError("");
+    try {
+      const checkout = await createPlanPayment(plan.key, 1);
+      sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo);
+      window.location.assign(checkout.payUrl);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "支付宝订单创建失败");
+      setPayingPlan(null);
+    }
+  };
 
   return (
     <main className="min-h-dvh bg-black pb-20 pt-24 text-white">
@@ -123,8 +138,8 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
                   </div>
                   <h2 className="mt-3 text-xl font-semibold tracking-normal text-white">{plan.label}</h2>
                   <PlanPrice plan={plan} />
-                  <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 bg-black px-4 text-sm font-semibold text-white transition-colors hover:border-white hover:bg-white hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white" onClick={() => onNavigate(startPath)} type="button">
-                    {plan.renewal_price_cents === 0 ? "免费开始" : "选择此套餐"}<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 bg-black px-4 text-sm font-semibold text-white transition-colors hover:border-white hover:bg-white hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-wait disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(plan)} type="button">
+                    {payingPlan === plan.key ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}{plan.renewal_price_cents === 0 ? "免费开始" : "支付宝购买"}{payingPlan !== plan.key ? <ArrowRight className="h-4 w-4" aria-hidden="true" /> : null}
                   </button>
                   <div className="mt-7 border-t border-white/10 pt-5">
                     <p className="text-xs font-medium text-zinc-500">包含权益</p>
