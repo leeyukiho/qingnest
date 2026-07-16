@@ -1021,13 +1021,17 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
 
 function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDrafts, usersById, confirm, changeStatus }: { data: AdminOverview; domainForm: { userId: string; prefix: string; suffix: string }; priceDrafts: Record<string, AdminDomainPrice>; setDomainForm: React.Dispatch<React.SetStateAction<{ userId: string; prefix: string; suffix: string }>>; setPriceDrafts: React.Dispatch<React.SetStateAction<Record<string, AdminDomainPrice>>>; usersById: Map<string, AdminOverview["recentUsers"][number]>; confirm: (action: PendingAction) => void; changeStatus: (kind: "项目" | "域名", id: string, name: string, current: string) => void }) {
   const [newSuffix, setNewSuffix] = useState("");
-  const [newPrice, setNewPrice] = useState("9.90");
-  const [newBillingPeriod, setNewBillingPeriod] = useState<AdminDomainPrice["billing_period"]>("year");
+  const [newPrices, setNewPrices] = useState({ monthly: "0.99", quarterly: "2.79", semiannual: "5.29", annual: "9.90" });
   const [domainQuery, setDomainQuery] = useState("");
   const [availability, setAvailability] = useState<Awaited<ReturnType<typeof checkSubdomain>> | null>(null);
   const [checkingPrefix, setCheckingPrefix] = useState(false);
   const [domainView, setDomainView] = useState<"pricing" | "assignment">("assignment");
-  const [priceValues, setPriceValues] = useState(() => Object.fromEntries(Object.values(priceDrafts).map((item) => [item.domain_type, String(item.price_cents / 100)])));
+  const [priceValues, setPriceValues] = useState(() => Object.fromEntries(Object.values(priceDrafts).flatMap((item) => [
+    [`${item.domain_type}:monthly`, String(item.monthly_price_cents / 100)],
+    [`${item.domain_type}:quarterly`, String(item.quarterly_price_cents / 100)],
+    [`${item.domain_type}:semiannual`, String(item.semiannual_price_cents / 100)],
+    [`${item.domain_type}:annual`, String(item.annual_price_cents / 100)],
+  ])));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const enabledSuffixes = Object.values(priceDrafts).filter((item) => item.enabled);
   useEffect(() => {
@@ -1073,9 +1077,14 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
         hostname_suffix: item.hostname_suffix || clientPlatformConfig.domains.distributionRoot,
       }));
     setPriceDrafts(Object.fromEntries(savedPrices.map((item) => [item.domain_type, item])));
-    setPriceValues(Object.fromEntries(savedPrices.map((item) => [item.domain_type, String(item.price_cents / 100)])));
+    setPriceValues(Object.fromEntries(savedPrices.flatMap((item) => [
+      [`${item.domain_type}:monthly`, String(item.monthly_price_cents / 100)],
+      [`${item.domain_type}:quarterly`, String(item.quarterly_price_cents / 100)],
+      [`${item.domain_type}:semiannual`, String(item.semiannual_price_cents / 100)],
+      [`${item.domain_type}:annual`, String(item.annual_price_cents / 100)],
+    ])));
     setNewSuffix("");
-    setNewPrice("9.90");
+    setNewPrices({ monthly: "0.99", quarterly: "2.79", semiannual: "5.29", annual: "9.90" });
     setFieldErrors({});
     setDomainForm({
       userId: "",
@@ -1097,38 +1106,18 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
       {domainView === "pricing" ? (
         <section className="mt-6 border-l-2 border-amber-400/40 pl-4 sm:pl-6">
           <SectionHeading title="平台域名定价" description="维护平台持有的域名后缀、价格和上架状态；这里的变更会影响用户可选择的域名。" />
-          <div className="mt-4 grid items-end gap-3 bg-amber-400/[0.04] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_9rem_8rem_auto]">
+          <div className="mt-4 grid items-end gap-3 bg-amber-400/[0.04] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_repeat(4,7rem)_auto]">
             <label className="grid min-w-0 gap-1 text-xs text-zinc-500">
               新域名后缀
               <ClearableInput aria-label="新域名后缀" onChange={(e) => { setNewSuffix(e.target.value); setFieldErrors((all) => ({ ...all, newSuffix: "" })); }} placeholder="pages.example.com" value={newSuffix} />
               <FieldError message={fieldErrors.newSuffix} />
             </label>
-            <label className="relative grid min-w-0 gap-1 text-xs text-zinc-500">
-              价格（元）
-              <ClearableInput
-                aria-label="新域名价格"
-                inputMode="decimal"
-                onChange={(e) => {
-                  setNewPrice(e.target.value);
-                  setFieldErrors((all) => ({ ...all, newPrice: "" }));
-                }}
-                value={newPrice}
-              />
-              <FieldError className="absolute left-0 top-full whitespace-nowrap" message={fieldErrors.newPrice} />
-            </label>
-            <label className="grid min-w-0 gap-1 text-xs text-zinc-500">
-              计费周期
-              <select className={selectClass} onChange={(e) => setNewBillingPeriod(e.target.value as AdminDomainPrice["billing_period"])} value={newBillingPeriod}>
-                <option value="month">每月</option>
-                <option value="year">每年</option>
-                <option value="one_time">一次性</option>
-              </select>
-            </label>
+            {([['monthly', '月付'], ['quarterly', '季付'], ['semiannual', '半年付'], ['annual', '年付']] as const).map(([key, label]) => <label className="grid min-w-0 gap-1 text-xs text-zinc-500" key={key}>{label}（元）<ClearableInput aria-label={`新域名${label}价格`} inputMode="decimal" onChange={(e) => setNewPrices((all) => ({ ...all, [key]: e.target.value }))} value={newPrices[key]} /></label>)}
             <button
               className={cn(STUDIO_SECONDARY_BUTTON_CLASS, "w-full lg:w-auto")}
               disabled={!newSuffix.includes(".")}
               onClick={() => {
-                if (!isValidNumber(newPrice)) {
+                if (Object.values(newPrices).some((value) => !isValidNumber(value))) {
                   setFieldErrors((all) => ({ ...all, newPrice: numberError }));
                   return;
                 }
@@ -1140,14 +1129,18 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                 const suffix = normalized.ascii;
                 confirm({
                   title: "新增平台域名",
-                  description: `新增 ${normalized.display}${normalized.display !== suffix ? `（${suffix}）` : ""}，价格 ¥${Number(newPrice).toFixed(2)}，${newBillingPeriod === "month" ? "按月" : newBillingPeriod === "year" ? "按年" : "一次性"}计费。`,
+                  description: `新增 ${normalized.display}${normalized.display !== suffix ? `（${suffix}）` : ""}，并保存月付、季付、半年付和年付价格。`,
                   run: async () => {
                     const created = await createAdminDomainPrice({
                       domain_type: platformDomainType(suffix),
                       label: normalized.display,
                       hostname_suffix: suffix,
-                      price_cents: Math.round(Number(newPrice) * 100),
-                      billing_period: newBillingPeriod,
+                      price_cents: Math.round(Number(newPrices.annual) * 100),
+                      billing_period: "year",
+                      monthly_price_cents: Math.round(Number(newPrices.monthly) * 100),
+                      quarterly_price_cents: Math.round(Number(newPrices.quarterly) * 100),
+                      semiannual_price_cents: Math.round(Number(newPrices.semiannual) * 100),
+                      annual_price_cents: Math.round(Number(newPrices.annual) * 100),
                       enabled: true,
                     });
                     setNewSuffix("");
@@ -1167,8 +1160,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
               <thead>
                 <tr className="border-b border-white/10 text-zinc-500">
                   <th className="px-3 py-3 font-medium">平台后缀</th>
-                  <th className="px-3 py-3 font-medium">价格（元）</th>
-                  <th className="px-3 py-3 font-medium">周期</th>
+                  <th className="px-3 py-3 font-medium">月 / 季 / 半年 / 年（元）</th>
                   <th className="px-3 py-3 font-medium">状态</th>
                   <th className="px-3 py-3 text-right font-medium">操作</th>
                 </tr>
@@ -1195,42 +1187,8 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                       <FieldError />
                     </Cell>
                     <Cell>
-                      <ClearableInput
-                        aria-label={`${draft.hostname_suffix} 价格`}
-                        inputMode="decimal"
-                        onChange={(e) => {
-                          setPriceValues((all) => ({
-                            ...all,
-                            [draft.domain_type]: e.target.value,
-                          }));
-                          setFieldErrors((all) => ({
-                            ...all,
-                            [draft.domain_type]: "",
-                          }));
-                        }}
-                        value={priceValues[draft.domain_type] ?? ""}
-                      />
+                      <div className="grid grid-cols-4 gap-2">{(['monthly', 'quarterly', 'semiannual', 'annual'] as const).map((period) => <ClearableInput aria-label={`${draft.hostname_suffix} ${period}价格`} inputMode="decimal" key={period} onChange={(e) => setPriceValues((all) => ({ ...all, [`${draft.domain_type}:${period}`]: e.target.value }))} value={priceValues[`${draft.domain_type}:${period}`] ?? ""} />)}</div>
                       <FieldError message={fieldErrors[draft.domain_type]} />
-                    </Cell>
-                    <Cell>
-                      <select
-                        aria-label={`${draft.hostname_suffix} 计费周期`}
-                        className={selectClass}
-                        onChange={(e) =>
-                          setPriceDrafts((all) => ({
-                            ...all,
-                            [draft.domain_type]: {
-                              ...draft,
-                              billing_period: e.target.value as AdminDomainPrice["billing_period"],
-                            },
-                          }))
-                        }
-                        value={draft.billing_period}
-                      >
-                        <option value="month">每月</option>
-                        <option value="year">每年</option>
-                        <option value="one_time">一次性</option>
-                      </select>
                     </Cell>
                     <Cell>
                       <DomainSetupStatus domain={draft} />
@@ -1268,8 +1226,8 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                         aria-label={`保存 ${draft.hostname_suffix}`}
                         className={saveButton}
                         onClick={() => {
-                          const value = priceValues[draft.domain_type];
-                          if (!isValidNumber(value)) {
+                          const values = Object.fromEntries((['monthly', 'quarterly', 'semiannual', 'annual'] as const).map((period) => [period, priceValues[`${draft.domain_type}:${period}`]]));
+                          if (Object.values(values).some((value) => !isValidNumber(value))) {
                             setFieldErrors((all) => ({
                               ...all,
                               [draft.domain_type]: numberError,
@@ -1282,7 +1240,12 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                             run: () =>
                               updateAdminDomainPrice(draft.domain_type, {
                                 ...draft,
-                                price_cents: Math.round(Number(value) * 100),
+                                price_cents: Math.round(Number(values.annual) * 100),
+                                billing_period: "year",
+                                monthly_price_cents: Math.round(Number(values.monthly) * 100),
+                                quarterly_price_cents: Math.round(Number(values.quarterly) * 100),
+                                semiannual_price_cents: Math.round(Number(values.semiannual) * 100),
+                                annual_price_cents: Math.round(Number(values.annual) * 100),
                               }),
                           });
                         }}

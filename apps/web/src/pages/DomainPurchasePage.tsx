@@ -8,9 +8,8 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import { StudioSidebar } from "@/app/StudioSidebar";
-import { StudioBreadcrumbTitle } from "@/app/StudioBreadcrumbTitle";
 import { useToast } from "@/app/toast";
-import { STUDIO_DOMAINS_PATH } from "@/app/navigation";
+import { STUDIO_MY_DOMAINS_PATH } from "@/app/navigation";
 import {
   STUDIO_CONTENT_SHELL_CLASS,
   STUDIO_HEADER_CLASS,
@@ -31,6 +30,12 @@ import { validateSubdomain } from "@qingnest/shared/config/platform";
 import { displayHostname } from "@qingnest/shared/config/domain";
 
 const domainRoot = clientPlatformConfig.domains.distributionRoot;
+const durationOptions = [
+  { months: 1 as const, label: "月付", priceKey: "monthly_price_cents" as const },
+  { months: 3 as const, label: "季付", priceKey: "quarterly_price_cents" as const },
+  { months: 6 as const, label: "半年付", priceKey: "semiannual_price_cents" as const },
+  { months: 12 as const, label: "年付", priceKey: "annual_price_cents" as const },
+];
 
 export function DomainPurchasePage({
   account,
@@ -48,6 +53,7 @@ export function DomainPurchasePage({
   const [selectedSuffix, setSelectedSuffix] = useState(domainRoot);
   const [domainQuery, setDomainQuery] = useState("");
   const [suffixFilter, setSuffixFilter] = useState("all");
+  const [durationMonths, setDurationMonths] = useState<1 | 3 | 6 | 12>(12);
   useEffect(() => {
     void getPlatformDomainCatalog().then((items) => {
       if (!items.length) return;
@@ -60,7 +66,10 @@ export function DomainPurchasePage({
     : null;
   const availableOptions = domainOptions.length
     ? domainOptions
-    : [{ domain_type: "platform_subdomain", label: domainRoot, hostname_suffix: domainRoot, price_cents: 990, billing_period: "year" as const, enabled: true }];
+    : [{ domain_type: "platform_subdomain", label: domainRoot, hostname_suffix: domainRoot, price_cents: 990, billing_period: "year" as const, monthly_price_cents: 99, quarterly_price_cents: 279, semiannual_price_cents: 529, annual_price_cents: 990, enabled: true }];
+  const selectedOption = availableOptions.find((option) => option.hostname_suffix === selectedSuffix) ?? availableOptions[0];
+  const selectedDuration = durationOptions.find((option) => option.months === durationMonths)!;
+  const selectedPrice = selectedOption[selectedDuration.priceKey];
   const suffixes = useMemo(
     () => Array.from(new Set(availableOptions.map((option) => displayHostname(option.hostname_suffix).split(".").at(-1) ?? ""))).filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN")),
     [domainOptions],
@@ -95,9 +104,9 @@ export function DomainPurchasePage({
     if (!availability.available) return;
     setPurchasing(true);
     try {
-      const slot = await rentPublicSlot(availability.normalized, selectedSuffix);
+      const slot = await rentPublicSlot(availability.normalized, selectedSuffix, durationMonths);
       showToast(`${slot.hostname} 已添加到你的域名`, "success");
-      onNavigate(STUDIO_DOMAINS_PATH);
+      onNavigate(STUDIO_MY_DOMAINS_PATH);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "租赁失败";
       showToast(message, "error");
@@ -111,17 +120,13 @@ export function DomainPurchasePage({
     <div className="min-h-dvh bg-black">
       <section className={STUDIO_SECTION_CLASS}>
         <div className={STUDIO_CONTENT_SHELL_CLASS}>
-          <StudioSidebar account={account} active="billing" onNavigate={onNavigate} />
+          <StudioSidebar account={account} active="domains" onNavigate={onNavigate} />
           <div className={STUDIO_MAIN_CLASS}>
             <div className={STUDIO_HEADER_CLASS}>
               <div>
-                <StudioBreadcrumbTitle
-                  backLabel="域名"
-                  currentLabel="租赁域名"
-                  onBack={() => onNavigate(STUDIO_DOMAINS_PATH)}
-                />
+                <h1 className="text-xl font-semibold tracking-normal text-white sm:text-2xl">域名市场</h1>
                 <p className="mt-2 text-sm text-zinc-500">
-                  选择平台已有域名，输入前缀即可检查并保留独立地址。
+                  选择平台已有域名和租赁时长，输入前缀即可检查并保留独立地址。
                 </p>
               </div>
             </div>
@@ -152,7 +157,7 @@ export function DomainPurchasePage({
                 {filteredOptions.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {filteredOptions.map((option) => {
                     const selected = selectedSuffix === option.hostname_suffix;
-                    return <button aria-pressed={selected} className={`flex min-h-20 cursor-pointer items-center justify-between rounded-md border p-4 text-left transition-colors ${selected ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.domain_type} onClick={() => { setSelectedSuffix(option.hostname_suffix); setCheck(null); }} type="button"><span><span className="block text-sm font-semibold text-zinc-100">{displayHostname(option.hostname_suffix)}</span><span className="mt-1 block text-xs text-zinc-500">¥{(option.price_cents / 100).toFixed(2)} / {option.billing_period === "month" ? "月" : option.billing_period === "year" ? "年" : "一次性"}</span></span>{selected ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : null}</button>;
+                    return <button aria-pressed={selected} className={`flex min-h-20 cursor-pointer items-center justify-between rounded-md border p-4 text-left transition-colors ${selected ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.domain_type} onClick={() => { setSelectedSuffix(option.hostname_suffix); setCheck(null); }} type="button"><span><span className="block text-sm font-semibold text-zinc-100">{displayHostname(option.hostname_suffix)}</span><span className="mt-1 block text-xs text-zinc-500">¥{(option.monthly_price_cents / 100).toFixed(2)} 起</span></span>{selected ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : null}</button>;
                   })}
                 </div> : <div className="mt-3 rounded-md border border-dashed border-white/15 px-4 py-8 text-center text-sm text-zinc-500">没有符合条件的平台域名</div>}
 
@@ -213,6 +218,18 @@ export function DomainPurchasePage({
                     </div>
                   </div>
                 </div>
+
+                <div className="mt-6">
+                  <p className="text-sm font-medium text-zinc-200">租赁时长</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {durationOptions.map((option) => (
+                      <button aria-pressed={durationMonths === option.months} className={`min-h-16 rounded-md border px-3 py-2 text-left ${durationMonths === option.months ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.months} onClick={() => setDurationMonths(option.months)} type="button">
+                        <span className="block text-sm font-medium text-zinc-200">{option.label}</span>
+                        <span className="mt-1 block text-xs text-zinc-500">¥{(selectedOption[option.priceKey] / 100).toFixed(2)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}>
@@ -224,7 +241,10 @@ export function DomainPurchasePage({
                 <p className="mt-3 text-sm leading-6 text-zinc-500">
                   当前未接入在线支付，本次确认不会扣款。地址会先保留在账户中，之后可绑定项目。
                 </p>
-                <p className="mt-3 text-xs text-zinc-600">租赁有效期为一年，自确认租赁之日起计算。</p>
+                <div className="mt-4 flex items-baseline justify-between border-t border-white/10 pt-4">
+                  <span className="text-xs text-zinc-500">{selectedDuration.label} · {durationMonths} 个月</span>
+                  <strong className="text-lg text-white">¥{(selectedPrice / 100).toFixed(2)}</strong>
+                </div>
                 <button
                   className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white bg-white px-4 text-sm font-semibold text-black transition-[border-color,opacity] hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={!localValidation?.ok || checking || purchasing}
@@ -236,10 +256,10 @@ export function DomainPurchasePage({
                 </button>
                 <button
                   className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white/20 bg-black px-4 text-sm font-semibold text-zinc-200 transition-[border-color] hover:border-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
-                  onClick={() => onNavigate(STUDIO_DOMAINS_PATH)}
+                  onClick={() => onNavigate(STUDIO_MY_DOMAINS_PATH)}
                   type="button"
                 >
-                  管理已有地址
+                  管理我的域名
                 </button>
               </aside>
             </div>

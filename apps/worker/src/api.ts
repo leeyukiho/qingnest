@@ -53,7 +53,7 @@ type SiteCreateInput = {
 };
 
 type PublicSlotInput = { siteId?: string; subdomain?: string };
-type PublicSlotRentalInput = { subdomain?: string; hostnameSuffix?: string };
+type PublicSlotRentalInput = { subdomain?: string; hostnameSuffix?: string; durationMonths?: 1 | 3 | 6 | 12 };
 type PublicSlotUpdateInput = { siteId?: string | null };
 
 type SiteUpdateInput = { name?: string };
@@ -404,6 +404,7 @@ export async function handleApi(request: Request, env: Env) {
         await rentPublicSlot(env, {
           subdomain: input.subdomain,
           hostnameSuffix: input.hostnameSuffix,
+          durationMonths: input.durationMonths,
           user,
         }),
         { status: 201 },

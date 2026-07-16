@@ -1,8 +1,8 @@
-import { Bell, Database, FolderKanban, Globe2, Plus, RotateCcw, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { Bell, Database, FolderKanban, Globe2, Plus, RotateCcw, Settings, SlidersHorizontal, UserRound, type LucideIcon } from "lucide-react";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import type { AccountProfile } from "@/lib/api";
 import { formatBytes } from "@/app/deployment-view";
-import { STUDIO_ADMIN_PATH, STUDIO_BILLING_PATH, STUDIO_DOMAINS_PATH, STUDIO_NOTIFICATIONS_PATH, STUDIO_PATH, STUDIO_PROFILE_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { STUDIO_ADMIN_PATH, STUDIO_BILLING_PATH, STUDIO_DOMAINS_PATH, STUDIO_MY_DOMAINS_PATH, STUDIO_NOTIFICATIONS_PATH, STUDIO_PATH, STUDIO_PROFILE_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { cn } from "@/lib/utils";
 
 type StudioNavItem = {
@@ -12,13 +12,15 @@ type StudioNavItem = {
   onClick: () => void;
 };
 
+export type StudioActiveNav = "create" | "projects" | "domains" | "domain-management" | "billing" | "profile" | "notifications" | "admin";
+
 export function StudioSidebar({
   account,
   active,
   onNavigate
 }: {
   account: AccountProfile | null;
-  active: "create" | "projects" | "domains" | "billing" | "profile" | "notifications" | "admin";
+  active: StudioActiveNav;
   onNavigate: (path: string) => void;
 }) {
   const navItems: StudioNavItem[] = [
@@ -37,8 +39,14 @@ export function StudioSidebar({
     {
       active: active === "domains",
       icon: Globe2,
-      label: "域名",
+      label: "全部域名",
       onClick: () => onNavigate(STUDIO_DOMAINS_PATH)
+    },
+    {
+      active: active === "domain-management",
+      icon: SlidersHorizontal,
+      label: "域名管理",
+      onClick: () => onNavigate(STUDIO_MY_DOMAINS_PATH)
     },
     {
       active: active === "billing",

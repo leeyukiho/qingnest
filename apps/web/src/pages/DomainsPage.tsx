@@ -15,7 +15,7 @@ import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
 import { StudioLoading } from "@/app/feedback";
 import {
-  STUDIO_DOMAIN_PURCHASE_PATH,
+  STUDIO_DOMAINS_PATH,
   STUDIO_PROJECTS_PATH,
 } from "@/app/navigation";
 import {
@@ -38,6 +38,13 @@ import {
   type PublicSlot,
 } from "@/lib/api";
 import { displayHostname } from "@qingnest/shared/config/domain";
+
+function formatRemainingTime(expiresAt: string) {
+  const days = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
+  if (days >= 365) return `剩余 ${Math.floor(days / 365)} 年`;
+  if (days >= 30) return `剩余 ${Math.floor(days / 30)} 个月`;
+  return `剩余 ${days} 天`;
+}
 
 export function DomainsPage({
   account,
@@ -84,7 +91,7 @@ export function DomainsPage({
     return (
       <StudioLoading
         account={account}
-        active="domains"
+        active="domain-management"
         label="正在读取域名"
         onNavigate={onNavigate}
       />
@@ -130,24 +137,24 @@ export function DomainsPage({
         <div className={STUDIO_CONTENT_SHELL_CLASS}>
           <StudioSidebar
             account={account}
-            active="domains"
+            active="domain-management"
             onNavigate={onNavigate}
           />
           <div className={STUDIO_MAIN_CLASS}>
             <div className={STUDIO_HEADER_CLASS}>
               <div>
-                <h1 className={STUDIO_TITLE_CLASS}>域名</h1>
+                <h1 className={STUDIO_TITLE_CLASS}>我的域名</h1>
                 <p className="mt-2 text-sm text-zinc-500">
                   管理已租赁和平台赠送的域名。绑定或换绑后 24 小时内不能再次操作；解绑后可立即绑定其他项目。
                 </p>
               </div>
               <button
                 className={STUDIO_SECONDARY_BUTTON_CLASS}
-                onClick={() => onNavigate(STUDIO_DOMAIN_PURCHASE_PATH)}
+                onClick={() => onNavigate(STUDIO_DOMAINS_PATH)}
                 type="button"
               >
                 <ShoppingBag className="h-4 w-4" />
-                租赁新域名
+                返回域名市场
               </button>
             </div>
             <ToastMessage message={error} />
@@ -162,7 +169,7 @@ export function DomainsPage({
                 </p>
                 <button
                   className={`${STUDIO_SECONDARY_BUTTON_CLASS} mt-5`}
-                  onClick={() => onNavigate(STUDIO_DOMAIN_PURCHASE_PATH)}
+                  onClick={() => onNavigate(STUDIO_DOMAINS_PATH)}
                   type="button"
                 >
                   <ShoppingBag className="h-4 w-4" />
@@ -202,7 +209,10 @@ export function DomainsPage({
                             ? "自定义域名"
                             : "平台域名"}
                         </p>
-                        <p className="mt-1 text-xs text-zinc-600">有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</p>
+                        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-zinc-600">
+                          <span>有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</span>
+                          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-zinc-500">{formatRemainingTime(slot.expiresAt)}</span>
+                        </p>
                       </div>
                       <div className="grid min-w-0 grid-rows-[1rem_2.25rem] gap-1">
                         <p className="text-xs text-zinc-600">绑定项目</p>

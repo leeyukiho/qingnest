@@ -5,7 +5,7 @@ import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
 import { getStatusLabel } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
-import { STUDIO_DOMAINS_PATH, STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { STUDIO_MY_DOMAINS_PATH, STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
 import { getCachedProjects, listProjects, type AccountProfile, type ProjectSummary } from "@/lib/api";
@@ -88,7 +88,7 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
                       <button className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-md bg-white/10 px-3 text-sm font-medium text-zinc-100 transition-colors hover:bg-white/15" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}`)} type="button">
                         管理项目<ArrowRight className="h-4 w-4" />
                       </button>
-                      {project.publicUrl ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(STUDIO_DOMAINS_PATH)} type="button">管理域名<Globe2 className="h-4 w-4" /></button> : <button className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-500 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}?tab=publishing`)} type="button">绑定域名<Globe2 className="h-4 w-4" /></button>}
+                      {project.publicUrl ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(STUDIO_MY_DOMAINS_PATH)} type="button">管理域名<Globe2 className="h-4 w-4" /></button> : <button className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-500 transition-colors hover:bg-white/5 hover:text-white" onClick={() => onNavigate(`${STUDIO_PROJECTS_PATH}/${project.id}?tab=publishing`)} type="button">绑定域名<Globe2 className="h-4 w-4" /></button>}
                     </div>
                   </article>
                 ))}

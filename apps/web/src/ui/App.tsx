@@ -19,6 +19,7 @@ import {
   STUDIO_BILLING_PATH,
   STUDIO_DOMAIN_PURCHASE_PATH,
   STUDIO_DOMAINS_PATH,
+  STUDIO_MY_DOMAINS_PATH,
   STUDIO_NOTIFICATIONS_PATH,
   STUDIO_PATH,
   STUDIO_PROJECTS_PATH,
@@ -72,7 +73,7 @@ export function App() {
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
-  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
+  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_MY_DOMAINS_PATH ? "domain-management" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
   const matchingCachedAccount = session && cachedSidebarAccount?.id === session.user.id ? cachedSidebarAccount : null;
   const silentGateAccount = account ?? matchingCachedAccount ?? (session ? {
     id: session.user.id,
@@ -349,11 +350,11 @@ export function App() {
     routeContent = <StudioLoading account={account} active={studioActive} label="正在跳转登录" onNavigate={navigate} />;
   } else if (pathname === STUDIO_PROJECTS_PATH) {
     routeContent = <ProjectsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
-  } else if (pathname === STUDIO_DOMAIN_PURCHASE_PATH) {
+  } else if (pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH) {
     routeContent = <DomainPurchasePage account={account} onNavigate={navigate} />;
   } else if (pathname === STUDIO_BILLING_PATH) {
     routeContent = <BillingPage account={account} onNavigate={navigate} />;
-  } else if (pathname === STUDIO_DOMAINS_PATH) {
+  } else if (pathname === STUDIO_MY_DOMAINS_PATH) {
     routeContent = <DomainsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else if (pathname === STUDIO_NOTIFICATIONS_PATH) {
     routeContent = <NotificationsPage account={account} onNavigate={navigate} />;

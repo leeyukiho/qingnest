@@ -23,6 +23,8 @@ export function clearAdminReadCaches() {
   adminOverviewRequest = null;
   capacityCache = null;
   capacityRequest = null;
+  notificationsCache = null;
+  notificationsRequest = null;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -207,7 +209,7 @@ export type AdminOverview = {
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
 export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour: number; max_domains_per_site: number; max_site_bytes: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
 export type PublicPlan = AdminPlan;
-export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
+export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
 export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
 export type AdminNotification = NotificationItem & { recipientEmail: string | null; createdByEmail: string };
 export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "resendEmailsDaily" | "resendEmailsMonthly";
@@ -217,12 +219,15 @@ export type CapacityDashboard = { settings: { stage: "free" | "workers_paid" | "
 
 const ADMIN_OVERVIEW_CACHE_MS = 5 * 60_000;
 const CAPACITY_CACHE_MS = 2 * 60 * 60_000;
+const NOTIFICATIONS_CACHE_MS = 5 * 60_000;
 const PUBLIC_PLANS_CACHE_MS = 6 * 60 * 60_000;
 const PUBLIC_PLANS_CACHE_KEY = "kuaipage:public-plans:v1";
 let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
 let adminOverviewRequest: Promise<AdminOverview> | null = null;
 let capacityCache: { data: CapacityDashboard; expiresAt: number } | null = null;
 let capacityRequest: Promise<CapacityDashboard> | null = null;
+let notificationsCache: { data: NotificationItem[]; expiresAt: number } | null = null;
+let notificationsRequest: Promise<NotificationItem[]> | null = null;
 let publicPlansRequest: Promise<PublicPlan[]> | null = null;
 
 export type SignUpConfirmationResult = {
@@ -308,11 +313,31 @@ export const updateAdminDomain = (id: string, input: { status?: "active" | "pend
 export const deleteAdminDomain = (id: string) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "DELETE");
 export const updateAdminPlan = (key: string, input: Partial<AdminPlan>) => adminMutation(`/api/admin/plans/${encodeURIComponent(key)}`, "PATCH", input);
 export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], input: Partial<AdminDomainPrice>) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "PATCH", input);
-export const createAdminDomainPrice = (input: Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "enabled">) => adminMutation<AdminDomainPrice>("/api/admin/domain-pricing", "POST", input);
+export const createAdminDomainPrice = (input: Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "enabled">) => adminMutation<AdminDomainPrice>("/api/admin/domain-pricing", "POST", input);
 export const deleteAdminDomainPrice = (type: string) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "DELETE");
 export const syncAdminDomainPrice = (type: string) => adminMutation<AdminDomainPrice>(`/api/admin/domain-pricing/${encodeURIComponent(type)}/sync`, "POST");
-export const getNotifications = () => request<NotificationItem[]>("/api/notifications");
-export const acknowledgeNotification = (id: string) => request<{ acknowledgedAt: string }>(`/api/notifications/${encodeURIComponent(id)}/acknowledge`, { method: "POST" });
+export async function getNotifications(force = false) {
+  if (!force && notificationsCache && notificationsCache.expiresAt > Date.now()) {
+    return notificationsCache.data;
+  }
+  if (!force && notificationsRequest) return notificationsRequest;
+  const pending = request<NotificationItem[]>("/api/notifications").then((data) => {
+    notificationsCache = { data, expiresAt: Date.now() + NOTIFICATIONS_CACHE_MS };
+    return data;
+  });
+  notificationsRequest = pending;
+  try { return await pending; } finally { if (notificationsRequest === pending) notificationsRequest = null; }
+}
+export async function acknowledgeNotification(id: string) {
+  const result = await request<{ acknowledgedAt: string }>(`/api/notifications/${encodeURIComponent(id)}/acknowledge`, { method: "POST" });
+  if (notificationsCache) {
+    notificationsCache = {
+      ...notificationsCache,
+      data: notificationsCache.data.map((item) => item.id === id ? { ...item, acknowledgedAt: result.acknowledgedAt } : item),
+    };
+  }
+  return result;
+}
 export const getAdminNotifications = () => request<AdminNotification[]>("/api/admin/notifications");
 export const createAdminNotification = (input: { title: string; body: string; audience: "all" | "user"; recipient?: string }) => adminMutation<AdminNotification>("/api/admin/notifications", "POST", input);
 export async function getAdminCapacity(force = false) {
@@ -331,7 +356,7 @@ export async function updateAdminCapacity(input: CapacityDashboard["settings"]) 
   return data;
 }
 
-export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "enabled">;
+export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "enabled">;
 let platformDomainCatalogRequest: Promise<PlatformDomainOption[]> | null = null;
 export const getPlatformDomainCatalog = () => {
   platformDomainCatalogRequest ??= request<PlatformDomainOption[]>("/api/domain-catalog");
@@ -425,10 +450,10 @@ export async function createPublicSlot(input: {
   return slot;
 }
 
-export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string) {
+export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string, durationMonths: 1 | 3 | 6 | 12 = 12) {
   const slot = await request<PublicSlot>("/api/public-slots/rent", {
     method: "POST",
-    body: JSON.stringify({ subdomain, hostnameSuffix }),
+    body: JSON.stringify({ subdomain, hostnameSuffix, durationMonths }),
   });
   publicSlotsCache = null;
   publicSlotsCachedAt = 0;

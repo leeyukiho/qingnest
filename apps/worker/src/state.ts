@@ -991,7 +991,7 @@ export async function getAccountProfile(
   const [
     { data: activeDeployments, error: storageError },
     { count: deploymentsToday, error: deploymentsError },
-    { count: publicSites, error: publicSitesError },
+    { data: publicDomains, error: publicSitesError },
   ] = await Promise.all([
     activeDeploymentIds.length > 0
       ? supabase
@@ -1006,14 +1006,23 @@ export async function getAccountProfile(
           .in("site_id", siteIds)
           .gte("created_at", dayAgo)
       : Promise.resolve({ count: 0, error: null }),
-    supabase
-      .from("domains")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .neq("status", "deleted"),
+    siteIds.length > 0
+      ? supabase
+          .from("domains")
+          .select("site_id")
+          .eq("user_id", user.id)
+          .eq("status", "active")
+          .in("site_id", siteIds)
+          .not("site_id", "is", null)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const usageError = storageError ?? deploymentsError ?? publicSitesError;
   if (usageError) throw new Error(usageError.message);
+  const publicSites = new Set(
+    (publicDomains ?? [])
+      .map((domain) => domain.site_id)
+      .filter((siteId): siteId is string => Boolean(siteId)),
+  ).size;
 
   return {
     id: user.id,
@@ -1026,7 +1035,7 @@ export async function getAccountProfile(
     createdAt: data.created_at,
     usage: {
       sites: sites?.length ?? 0,
-      publicSites: publicSites ?? 0,
+      publicSites,
       storageBytes: (activeDeployments ?? []).reduce(
         (total, deployment) => total + Number(deployment.total_bytes ?? 0),
         0,
@@ -1249,6 +1258,10 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
     hostname_suffix: requestedSuffix,
     price_cents: update.price_cents,
     billing_period: update.billing_period,
+    monthly_price_cents: update.monthly_price_cents,
+    quarterly_price_cents: update.quarterly_price_cents,
+    semiannual_price_cents: update.semiannual_price_cents,
+    annual_price_cents: update.annual_price_cents,
     enabled: update.enabled,
     updated_at: new Date().toISOString(),
   };
@@ -1781,13 +1794,17 @@ export async function createPublicSlot(
 
 export async function rentPublicSlot(
   env: Env,
-  input: { subdomain: string; hostnameSuffix?: string; user: AuthenticatedUser },
+  input: { subdomain: string; hostnameSuffix?: string; durationMonths?: 1 | 3 | 6 | 12; user: AuthenticatedUser },
 ) {
   const availability = await checkSubdomainAvailability(env, input.subdomain, input.hostnameSuffix);
   if (!availability.available)
     throw new Error(availability.reason ?? "公开地址不可用");
 
   const supabase = createServiceSupabase(env);
+  const durationMonths = input.durationMonths ?? 12;
+  if (![1, 3, 6, 12].includes(durationMonths)) throw new Error("请选择有效的租赁时长");
+  const expiresAt = new Date();
+  expiresAt.setUTCMonth(expiresAt.getUTCMonth() + durationMonths);
   const { data: domain, error } = await supabase
     .from("domains")
     .insert({
@@ -1798,6 +1815,7 @@ export async function rentPublicSlot(
         getDistributionHostname(env, availability.normalized),
       type: "platform_subdomain",
       status: availability.requiresReview ? "pending_review" : "active",
+      expires_at: expiresAt.toISOString(),
     })
     .select("id, site_id, hostname, type, status")
     .single();
@@ -1812,9 +1830,9 @@ export async function rentPublicSlot(
 
 export async function listPlatformDomainCatalog(env: Env) {
   const fallback = getWorkerPlatformConfig(env).domains.distributionRoot;
-  if (!hasServiceSupabase(env)) return [{ domain_type: "platform_subdomain", label: fallback, hostname_suffix: fallback, price_cents: 990, billing_period: "year", enabled: true }];
+  if (!hasServiceSupabase(env)) return [{ domain_type: "platform_subdomain", label: fallback, hostname_suffix: fallback, price_cents: 990, billing_period: "year", monthly_price_cents: 99, quarterly_price_cents: 279, semiannual_price_cents: 529, annual_price_cents: 990, enabled: true }];
   const supabase = createServiceSupabase(env);
-  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, enabled").eq("enabled", true).eq("setup_status", "active").order("price_cents");
+  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, monthly_price_cents, quarterly_price_cents, semiannual_price_cents, annual_price_cents, enabled").eq("enabled", true).eq("setup_status", "active").order("annual_price_cents");
   if (error) throw new Error(error.message);
   return data ?? [];
 }

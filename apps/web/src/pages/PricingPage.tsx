@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, Crown, Database, Globe2, LoaderCircle, Rocket, UploadCloud, X } from "lucide-react";
+import { ArrowRight, Check, LoaderCircle, Minus } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { CONTENT_TRACK_CLASS } from "@/app/ui";
 import { STUDIO_BILLING_PATH } from "@/app/navigation";
@@ -28,27 +28,25 @@ function money(cents: number) {
 
 function PlanPrice({ plan }: { plan: PublicPlan }) {
   const isFree = plan.renewal_price_cents === 0;
-  const daily = plan.renewal_price_cents / 100 / 30;
   const saving = plan.monthly_price_cents > plan.renewal_price_cents
     ? Math.round((1 - plan.renewal_price_cents / plan.monthly_price_cents) * 100)
     : 0;
 
   return (
-    <div className="mt-5 min-h-[6.5rem]">
-      <div className="flex items-end justify-center gap-2">
-        <span className="pb-2 text-xl font-semibold text-zinc-500">¥</span>
-        <span className="text-6xl font-bold leading-none tracking-normal text-white sm:text-7xl">{money(plan.renewal_price_cents)}</span>
-        <span className="pb-2 text-sm font-medium text-zinc-500">/ 月</span>
+    <div className="mt-6 min-h-24">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-sm font-medium text-zinc-500">¥</span>
+        <span className="text-4xl font-semibold leading-none tracking-normal text-white tabular-nums">{money(plan.renewal_price_cents)}</span>
+        <span className="text-sm text-zinc-500">/ 月</span>
       </div>
       {isFree ? (
-        <p className="mt-3 text-sm font-semibold text-emerald-300">永久免费，无需绑定支付方式</p>
+        <p className="mt-3 text-xs leading-5 text-zinc-500">永久免费，无需绑定支付方式</p>
       ) : (
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-          <span className="rounded border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-xs font-semibold text-emerald-200">续费特惠{saving ? ` · 省 ${saving}%` : ""}</span>
-          <span className="text-sm text-zinc-400">折合每天仅 <strong className="text-lg font-bold text-white">¥{daily.toFixed(2)}</strong></span>
-        </div>
+        <p className="mt-3 text-xs leading-5 text-zinc-500">
+          续费价格{saving ? `，相比月付节省 ${saving}%` : ""}
+          {saving ? <span className="ml-1 text-zinc-600">· 月付 ¥{money(plan.monthly_price_cents)}</span> : null}
+        </p>
       )}
-      {saving ? <p className="mt-2 text-xs text-zinc-600">普通月价 ¥{money(plan.monthly_price_cents)}，续费长期享特惠价</p> : null}
     </div>
   );
 }
@@ -73,13 +71,13 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const startPath = session ? STUDIO_BILLING_PATH : "/auth?mode=sign_up";
 
   return (
-    <main className="min-h-dvh bg-black pb-16 pt-24 text-white">
-      <header className={cn(CONTENT_TRACK_CLASS, "border-b border-white/15 pb-6")}>
-        <div className="mx-auto max-w-4xl text-center">
-          <h1 className="text-balance text-4xl font-semibold leading-tight tracking-normal text-white sm:text-[3.5rem]">选择适合你的套餐</h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-400 sm:text-base">清晰的价格与权益，按需选择，随时升级。</p>
+    <main className="min-h-dvh bg-black pb-20 pt-24 text-white">
+      <header className={cn(CONTENT_TRACK_CLASS, "pb-8 pt-6 sm:pb-10 sm:pt-10")}>
+        <div className="max-w-2xl">
+          <h1 className="text-3xl font-semibold leading-tight tracking-normal text-white sm:text-4xl">套餐与价格</h1>
+          <p className="mt-3 text-sm leading-6 text-zinc-400 sm:text-base">按当前需求选择，所有套餐均可随时升级。</p>
           {availableProductTabs.length > 1 ? (
-          <div className="mx-auto mt-5 inline-grid max-w-full rounded-md border border-white/15 bg-white/[0.04] p-1" role="tablist" aria-label="定价产品" style={{ gridTemplateColumns: `repeat(${availableProductTabs.length}, minmax(0, 1fr))` }}>
+          <div className="mt-5 inline-grid max-w-full rounded-md border border-white/15 bg-white/[0.04] p-1" role="tablist" aria-label="定价产品" style={{ gridTemplateColumns: `repeat(${availableProductTabs.length}, minmax(0, 1fr))` }}>
             {availableProductTabs.map((tab) => (
               <button
                 aria-selected={activeProduct === tab.key}
@@ -101,27 +99,50 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
         </div>
       </header>
 
-      <section className={cn(CONTENT_TRACK_CLASS, "py-4")} aria-label="套餐列表">
+      <section className={CONTENT_TRACK_CLASS} aria-label="套餐列表">
         {loading ? <div className="flex min-h-72 items-center justify-center gap-3 text-zinc-400"><LoaderCircle className="h-5 w-5 animate-spin" />正在读取套餐</div> : null}
         {error ? <p className="border-b border-red-400/30 py-10 text-red-300" role="alert">{error}</p> : null}
         {!loading && !error ? (
-          <div className="grid border-b border-white/15 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-px overflow-hidden rounded-md border border-white/15 bg-white/15 md:grid-cols-2 xl:grid-cols-4">
             {plans.map((plan) => {
               const recommended = plan.key === recommendedKey;
+              const benefits = [
+                `最多 ${plan.max_sites} 个站点`,
+                `其中 ${plan.max_public_sites} 个公开站点`,
+                `总存储 ${formatBytes(plan.max_storage_bytes)}`,
+                `单站容量 ${formatBytes(plan.max_site_bytes)}`,
+                `单次最多 ${plan.max_files.toLocaleString("zh-CN")} 个文件`,
+                `每天 ${plan.max_deployments_per_day} 次部署`,
+                `每站最多 ${plan.max_domains_per_site} 个域名`,
+              ];
               return (
-                <article key={plan.key} className={cn("relative flex min-h-[30rem] flex-col items-center border-b border-white/15 px-5 py-6 text-center md:border-r xl:border-b-0", recommended && "bg-white/[0.06]")}>
-                  {recommended ? <span className="absolute right-4 top-4 flex items-center gap-1 rounded border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-xs font-semibold text-cyan-200"><Crown className="h-3.5 w-3.5" />最受欢迎</span> : null}
-                  <p className="text-sm font-semibold uppercase text-zinc-500">{plan.key}</p>
-                  <h3 className="mt-2 text-2xl font-semibold tracking-normal">{plan.label}</h3>
+                <article key={plan.key} className="flex min-h-[38rem] flex-col bg-black px-5 py-6 sm:px-6">
+                  <div className="flex min-h-7 items-center justify-between gap-3">
+                    <p className="text-xs font-medium uppercase text-zinc-600">{plan.key}</p>
+                    {recommended ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-300"><span className="h-1.5 w-1.5 rounded-full bg-white" />最受欢迎</span> : null}
+                  </div>
+                  <h2 className="mt-3 text-xl font-semibold tracking-normal text-white">{plan.label}</h2>
                   <PlanPrice plan={plan} />
-                  <button className={cn("mt-5 inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white", recommended ? "border-white bg-white text-black hover:bg-black hover:text-white" : "border-white/25 bg-black hover:border-white hover:bg-white hover:text-black")} onClick={() => onNavigate(startPath)} type="button">
+                  <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 bg-black px-4 text-sm font-semibold text-white transition-colors hover:border-white hover:bg-white hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white" onClick={() => onNavigate(startPath)} type="button">
                     {plan.renewal_price_cents === 0 ? "免费开始" : "选择此套餐"}<ArrowRight className="h-4 w-4" aria-hidden="true" />
                   </button>
-                  <ul className="mt-5 space-y-2.5 text-sm text-zinc-300">
-                    <li className="flex justify-center gap-2"><Rocket className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />最多 {plan.max_sites} 个站点，{plan.max_public_sites} 个公开站点</li>
-                    <li className="flex justify-center gap-2"><Database className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />总存储 {formatBytes(plan.max_storage_bytes)}</li>
-                    <li className="flex justify-center gap-2"><UploadCloud className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />每天 {plan.max_deployments_per_day} 次部署</li>
-                    <li className="flex justify-center gap-2"><Globe2 className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" />每站最多 {plan.max_domains_per_site} 个域名</li>
+                  <div className="mt-7 border-t border-white/10 pt-5">
+                    <p className="text-xs font-medium text-zinc-500">包含权益</p>
+                  </div>
+                  <ul className="mt-2 divide-y divide-white/[0.07] text-sm text-zinc-300">
+                    {benefits.map((benefit) => (
+                      <li className="flex min-h-10 items-center gap-2.5 py-2" key={benefit}><Check className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" /><span>{benefit}</span></li>
+                    ))}
+                    {capabilityRows.map((row) => {
+                      const included = Boolean(plan[row.key]);
+                      return (
+                        <li className={cn("flex min-h-10 items-center gap-2.5 py-2", !included && "text-zinc-600")} key={row.key}>
+                          {included ? <Check className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" /> : <Minus className="h-4 w-4 shrink-0 text-zinc-700" aria-hidden="true" />}
+                          <span>{row.label}</span>
+                          {!included ? <span className="ml-auto text-xs text-zinc-700">未包含</span> : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </article>
               );
@@ -130,21 +151,6 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
         ) : null}
       </section>
 
-      {plans.length ? (
-        <section className={cn(CONTENT_TRACK_CLASS, "pt-8")} aria-labelledby="compare-heading">
-          <div className="border-b border-white/15 pb-4 text-center"><h2 id="compare-heading" className="text-2xl font-semibold tracking-normal">权益对比</h2></div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-center text-sm">
-              <thead><tr className="border-b border-white/15"><th className="w-64 px-4 py-5 font-semibold text-zinc-400">权益与配额</th>{plans.map((plan) => <th className="px-4 py-5 text-base font-semibold" key={plan.key}>{plan.label}</th>)}</tr></thead>
-              <tbody>
-                <tr className="border-b border-white/10"><th className="px-4 py-4 font-medium text-zinc-400">单站容量</th>{plans.map((plan) => <td className="px-4 py-4" key={plan.key}>{formatBytes(plan.max_site_bytes)}</td>)}</tr>
-                <tr className="border-b border-white/10"><th className="px-4 py-4 font-medium text-zinc-400">单次最多文件</th>{plans.map((plan) => <td className="px-4 py-4" key={plan.key}>{plan.max_files.toLocaleString("zh-CN")}</td>)}</tr>
-                {capabilityRows.map((row) => <tr className="border-b border-white/10" key={row.key}><th className="px-4 py-4 font-medium text-zinc-400">{row.label}</th>{plans.map((plan) => <td className="px-4 py-4" key={plan.key}>{plan[row.key] ? <><Check className="inline h-4 w-4 text-emerald-300" aria-label="包含" /></> : <X className="inline h-4 w-4 text-zinc-700" aria-label="不包含" />}</td>)}</tr>)}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
     </main>
   );
 }

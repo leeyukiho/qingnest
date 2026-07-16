@@ -3,6 +3,7 @@ import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
 import { CONTENT_TRACK_CLASS, PRIMARY_CTA_BUTTON_CLASS } from "@/app/ui";
 import { cn } from "@/lib/utils";
 import { StudioSidebar } from "@/app/StudioSidebar";
+import type { StudioActiveNav } from "@/app/StudioSidebar";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_MAIN_CLASS, STUDIO_SECTION_CLASS } from "@/app/ui";
 import type { AccountProfile } from "@/lib/api";
 
@@ -63,7 +64,7 @@ export function StudioLoading({
   onNavigate
 }: {
   account: AccountProfile | null;
-  active: "create" | "projects" | "domains" | "billing" | "profile" | "notifications" | "admin";
+  active: StudioActiveNav;
   label: string;
   onNavigate: (path: string) => void;
 }) {
