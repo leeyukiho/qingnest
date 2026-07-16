@@ -22,6 +22,7 @@ export type OrderView = {
   paidAt: string | null;
   fulfilledAt: string | null;
   failureMessage: string | null;
+  payUrl: string | null;
   createdAt: string;
 };
 
@@ -112,6 +113,10 @@ async function expirePendingOrders(env: Env) {
 }
 
 async function createFmPayment(env: Env, order: OrderRow) {
+  if (order.status === "pending" && order.pay_url && order.provider_order_id
+      && Date.parse(order.expires_at) > Date.now()) {
+    return { orderId: order.id, orderNo: order.order_no, payUrl: order.pay_url, expiresAt: order.expires_at };
+  }
   const config = fmConfig(env);
   const amount = fmAmountFromCents(order.amount_cents);
   const params = new URLSearchParams({
@@ -310,7 +315,9 @@ function orderView(row: OrderRow, actualAmountCents: number | null): OrderView {
   return { id: row.id, orderNo: row.order_no, type: row.type, status: row.status,
     amountCents: row.amount_cents, actualAmountCents, productName: row.product_name,
     productSnapshot: row.product_snapshot, expiresAt: row.expires_at, paidAt: row.paid_at,
-    fulfilledAt: row.fulfilled_at, failureMessage: row.failure_message, createdAt: row.created_at };
+    fulfilledAt: row.fulfilled_at, failureMessage: row.failure_message,
+    payUrl: row.status === "pending" && Date.parse(row.expires_at) > Date.now() ? row.pay_url : null,
+    createdAt: row.created_at };
 }
 
 export async function listUserOrders(env: Env, user: AuthenticatedUser) {
