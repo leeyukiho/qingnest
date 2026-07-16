@@ -1,8 +1,8 @@
-import { Database, FolderKanban, Globe2, Plus, RotateCcw, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { Bell, Database, FolderKanban, Globe2, Plus, RotateCcw, Settings, UserRound, type LucideIcon } from "lucide-react";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import type { AccountProfile } from "@/lib/api";
 import { formatBytes } from "@/app/deployment-view";
-import { STUDIO_ADMIN_PATH, STUDIO_BILLING_PATH, STUDIO_DOMAINS_PATH, STUDIO_PATH, STUDIO_PROFILE_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { STUDIO_ADMIN_PATH, STUDIO_BILLING_PATH, STUDIO_DOMAINS_PATH, STUDIO_NOTIFICATIONS_PATH, STUDIO_PATH, STUDIO_PROFILE_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import { cn } from "@/lib/utils";
 
 type StudioNavItem = {
@@ -18,7 +18,7 @@ export function StudioSidebar({
   onNavigate
 }: {
   account: AccountProfile | null;
-  active: "create" | "projects" | "domains" | "billing" | "profile" | "admin";
+  active: "create" | "projects" | "domains" | "billing" | "profile" | "notifications" | "admin";
   onNavigate: (path: string) => void;
 }) {
   const navItems: StudioNavItem[] = [
@@ -51,6 +51,12 @@ export function StudioSidebar({
       icon: UserRound,
       label: "账户",
       onClick: () => onNavigate(STUDIO_PROFILE_PATH)
+    },
+    {
+      active: active === "notifications",
+      icon: Bell,
+      label: "通知",
+      onClick: () => onNavigate(STUDIO_NOTIFICATIONS_PATH)
     },
     ...(account?.role === "admin"
       ? [

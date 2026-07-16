@@ -10,7 +10,7 @@ import {
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { StudioBreadcrumbTitle } from "@/app/StudioBreadcrumbTitle";
 import { useToast } from "@/app/toast";
-import { STUDIO_BILLING_PATH, STUDIO_DOMAINS_PATH } from "@/app/navigation";
+import { STUDIO_DOMAINS_PATH } from "@/app/navigation";
 import {
   STUDIO_CONTENT_SHELL_CLASS,
   STUDIO_HEADER_CLASS,
@@ -71,49 +71,37 @@ export function DomainPurchasePage({
     return (!query || display.toLocaleLowerCase().includes(query) || option.hostname_suffix.toLowerCase().includes(query)) && (suffixFilter === "all" || display.split(".").at(-1) === suffixFilter);
   });
 
-  const handleCheck = async () => {
+  const handlePurchase = async () => {
+    if (purchasing || checking) return;
     const value = prefix.trim().toLowerCase();
-    setCheck(null);
-    if (!value) {
-      return;
-    }
-
     const validation = validateSubdomain(value);
     if (!validation.ok) {
-      setChecking(false);
-      setCheck({
-        available: false,
-        normalized: validation.normalized,
-        reason: validation.reason,
-      });
+      setCheck({ available: false, normalized: validation.normalized, reason: validation.reason });
       return;
     }
-
     setChecking(true);
+    setCheck(null);
+    let availability: SubdomainCheck;
     try {
-      setCheck(await checkSubdomain(validation.normalized, selectedSuffix));
+      availability = await checkSubdomain(validation.normalized, selectedSuffix);
+      setCheck(availability);
     } catch (cause) {
-      setCheck({
-        available: false,
-        normalized: value,
-        reason: cause instanceof Error ? cause.message : "可用性检查失败",
-      });
-    } finally {
+      const message = cause instanceof Error ? cause.message : "可用性检查失败";
+      setCheck({ available: false, normalized: validation.normalized, reason: message });
       setChecking(false);
+      return;
     }
-  };
-
-  const handlePurchase = async () => {
-    if (!check?.available || purchasing) return;
+    setChecking(false);
+    if (!availability.available) return;
     setPurchasing(true);
     try {
-      const slot = await rentPublicSlot(check.normalized, selectedSuffix);
+      const slot = await rentPublicSlot(availability.normalized, selectedSuffix);
       showToast(`${slot.hostname} 已添加到你的域名`, "success");
       onNavigate(STUDIO_DOMAINS_PATH);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "租赁失败";
       showToast(message, "error");
-      setCheck({ ...check, available: false, reason: message });
+      setCheck({ ...availability, available: false, reason: message });
     } finally {
       setPurchasing(false);
     }
@@ -128,9 +116,9 @@ export function DomainPurchasePage({
             <div className={STUDIO_HEADER_CLASS}>
               <div>
                 <StudioBreadcrumbTitle
-                  backLabel="套餐与账单"
+                  backLabel="域名"
                   currentLabel="租赁域名"
-                  onBack={() => onNavigate(STUDIO_BILLING_PATH)}
+                  onBack={() => onNavigate(STUDIO_DOMAINS_PATH)}
                 />
                 <p className="mt-2 text-sm text-zinc-500">
                   选择平台已有域名，输入前缀即可检查并保留独立地址。
@@ -195,7 +183,7 @@ export function DomainPurchasePage({
                         );
                       }}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") void handleCheck();
+                        if (event.key === "Enter") void handlePurchase();
                       }}
                       placeholder="例如 mypage"
                       spellCheck={false}
@@ -206,7 +194,7 @@ export function DomainPurchasePage({
                     </span>
                   </div>
 
-                  <div className="mt-3 flex min-h-10 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="mt-3 min-h-10">
                     <div className="min-h-5" aria-live="polite">
                       {checking ? (
                         <p className="flex items-center gap-2 text-sm text-zinc-500">
@@ -223,15 +211,6 @@ export function DomainPurchasePage({
                         <p className="text-sm text-zinc-600">输入完成后点击检查</p>
                       )}
                     </div>
-                    <button
-                      className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-white/20 bg-black px-3 text-sm font-medium text-zinc-200 transition-[border-color] hover:border-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-40"
-                      disabled={!localValidation?.ok || checking}
-                      onClick={() => void handleCheck()}
-                      type="button"
-                    >
-                      {checking ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                      {checking ? "检查中" : "检查可用性"}
-                    </button>
                   </div>
                 </div>
               </div>
@@ -245,14 +224,15 @@ export function DomainPurchasePage({
                 <p className="mt-3 text-sm leading-6 text-zinc-500">
                   当前未接入在线支付，本次确认不会扣款。地址会先保留在账户中，之后可绑定项目。
                 </p>
+                <p className="mt-3 text-xs text-zinc-600">租赁有效期为一年，自确认租赁之日起计算。</p>
                 <button
                   className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white bg-white px-4 text-sm font-semibold text-black transition-[border-color,opacity] hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!check?.available || checking || purchasing}
-                  onClick={handlePurchase}
+                  disabled={!localValidation?.ok || checking || purchasing}
+                  onClick={() => void handlePurchase()}
                   type="button"
                 >
-                  {purchasing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                  {purchasing ? "正在保留" : "确认租赁"}
+                  {checking || purchasing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                  {checking ? "正在检查" : purchasing ? "正在保留" : "确认租赁"}
                 </button>
                 <button
                   className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-white/20 bg-black px-4 text-sm font-semibold text-zinc-200 transition-[border-color] hover:border-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"

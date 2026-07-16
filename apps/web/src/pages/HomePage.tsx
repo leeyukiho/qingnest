@@ -7,7 +7,6 @@ import { FloatingDock, type FloatingDockItem } from "@/components/ui/floating-do
 import { AuroraHero } from "@/components/ui/hero-2";
 import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
 import { SparklesCore } from "@/components/ui/sparkles";
-import { TextHoverEffect } from "@/components/ui/text-hover-effect";
 import { VanishingText } from "@/components/ui/vanishing-text";
 import { STUDIO_PATH } from "@/app/navigation";
 import { BRAND_LAYOUT_ID, CONTENT_TRACK_CLASS, HERO_VANISH_FALLBACK_MS, PRIMARY_CTA_BUTTON_CLASS } from "@/app/ui";
@@ -143,27 +142,23 @@ function QingNestMark({
     >
       <h1 className="sr-only">QingNest</h1>
       <motion.div
-        className="relative z-20 mx-auto aspect-[4/1] w-full max-w-[48rem] overflow-visible"
-        data-particle-emphasis="qingnest"
-        data-particle-text="QingNest"
-        layout="preserve-aspect"
-        layoutId={layoutId}
-        transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
-      >
-        {vanishing ? (
-          <VanishingText
-            canvasClassName="h-full w-full"
-            className="block h-full w-full"
-            contentClassName="block h-full w-full"
-            drawOptions={qingNestVanishDrawOptions}
-            onComplete={onVanishComplete}
-            onNearComplete={onVanishComplete}
-            text="QingNest"
-            vanishing
-          />
-        ) : (
-          <TextHoverEffect revealRadius={540} text="QingNest" />
-        )}
+        className="relative z-20 mx-auto aspect-[4/1] w-full max-w-[48rem] overflow-visible"
+        data-particle-emphasis="qingnest"
+        data-particle-text="QingNest"
+        layoutId={layoutId}
+        transition={{ duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <VanishingText
+          canvasClassName="h-full w-full"
+          className="block h-full w-full"
+          contentClassName="block h-full w-full"
+          drawOptions={qingNestVanishDrawOptions}
+          onComplete={onVanishComplete}
+          onNearComplete={onVanishComplete}
+          nearCompleteRatio={0.1}
+          text="QingNest"
+          vanishing={vanishing}
+        />
       </motion.div>
       <BrandSignal />
     </motion.div>
@@ -219,7 +214,7 @@ function HeroScreen({
   }
 
   return (
-    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"} particles>
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
       <section
         className={cn(
           CONTENT_TRACK_CLASS,
@@ -306,7 +301,7 @@ function StepsScreen({ mobile = false }: { mobile?: boolean }) {
   });
 
   return (
-    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"} particles>
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
       <section
         className={cn(
           CONTENT_TRACK_CLASS,
@@ -398,7 +393,7 @@ function StepsScreen({ mobile = false }: { mobile?: boolean }) {
 
 function PricingScreen({ mobile = false, onStart }: { mobile?: boolean; onStart: () => void }) {
   return (
-    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"} particles>
+    <AuroraHero className={mobile ? "min-h-[100svh]" : "h-dvh min-h-dvh"}>
       <section
         className={cn(
           CONTENT_TRACK_CLASS,
@@ -568,7 +563,6 @@ function MobileHomePage({
         <StepsScreen mobile />
       </div>
       <div className="snap-start" data-home-page="2">
-        <PricingScreen mobile onStart={() => onNavigate(startPath)} />
       </div>
     </div>
   );
@@ -612,10 +606,8 @@ export function HomePage({
             onNext={() => onGoToPage(1)}
             onStart={() => onNavigate(session ? STUDIO_PATH : "/auth?mode=sign_up")}
           />
-        ) : page === 1 ? (
-          <StepsScreen />
         ) : (
-          <PricingScreen onStart={() => onNavigate(session ? STUDIO_PATH : "/auth?mode=sign_up")} />
+          <StepsScreen />
         )}
       </motion.div>
     </AnimatePresence>

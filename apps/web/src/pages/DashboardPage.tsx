@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   Check,
+  CircleAlert,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -21,7 +22,7 @@ import {
   hasBlockingScanIssues,
 } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
-import { STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { STUDIO_BILLING_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 import {
   STUDIO_CONTENT_SHELL_CLASS,
   STUDIO_HEADER_CLASS,
@@ -83,6 +84,8 @@ export function DashboardPage({
   const planName = account?.plan ?? "free";
   const plan = getPlanConfig(planName);
   const blocked = hasBlockingScanIssues(prepared?.scan ?? null);
+  const projectQuotaReached =
+    account !== null && account.usage.sites >= plan.quotas.user.maxSites;
 
   useEffect(() => {
     if (!session) return;
@@ -106,6 +109,10 @@ export function DashboardPage({
     if (creating) return;
     setError(null);
 
+    if (projectQuotaReached)
+      return setError(
+        `当前套餐最多创建 ${plan.quotas.user.maxSites} 个项目`,
+      );
     if (!siteName.trim()) return setError("请输入项目名称");
     setCreating(true);
     try {
@@ -211,10 +218,11 @@ export function DashboardPage({
               <h1 className={STUDIO_TITLE_CLASS}>新建项目</h1>
             </div>
 
-            <ol
-              className="mt-5 grid grid-cols-3 border-b border-white/10"
-              aria-label="创建进度"
-            >
+            {!projectQuotaReached || step > 1 ? (
+              <ol
+                className="mt-5 grid grid-cols-3 border-b border-white/10"
+                aria-label="创建进度"
+              >
               {steps.map((item) => {
                 const Icon = item.icon;
                 const complete = step > item.id || Boolean(result);
@@ -246,11 +254,41 @@ export function DashboardPage({
                   </li>
                 );
               })}
-            </ol>
+              </ol>
+            ) : null}
 
             <ToastMessage message={error} />
 
-            {step === 1 ? (
+            {step === 1 && projectQuotaReached ? (
+              <div className={`${STUDIO_PANEL_CLASS} mt-5 w-full p-5 sm:p-6`}>
+                <CircleAlert className="h-5 w-5 text-zinc-300" />
+                <h2 className="mt-4 text-base font-semibold text-white">
+                  项目额度已用完
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+                  当前套餐最多创建 {plan.quotas.user.maxSites} 个项目，你已创建{" "}
+                  {account?.usage.sites ?? 0} 个。删除不再需要的项目，或升级套餐后即可继续创建。
+                </p>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <button
+                    className="inline-flex h-10 cursor-pointer items-center rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200"
+                    onClick={() => onNavigate(STUDIO_PROJECTS_PATH)}
+                    type="button"
+                  >
+                    管理项目
+                  </button>
+                  <button
+                    className="inline-flex h-10 cursor-pointer items-center rounded-md border border-white/20 px-4 text-sm font-medium text-zinc-200 transition-colors hover:border-white/35 hover:bg-white/5"
+                    onClick={() => onNavigate(STUDIO_BILLING_PATH)}
+                    type="button"
+                  >
+                    查看套餐
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {step === 1 && !projectQuotaReached ? (
               <form
                 className={`${STUDIO_PANEL_CLASS} mt-5 w-full p-5 sm:p-6`}
                 onSubmit={createProject}

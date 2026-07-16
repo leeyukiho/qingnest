@@ -63,7 +63,7 @@ export function StudioLoading({
   onNavigate
 }: {
   account: AccountProfile | null;
-  active: "create" | "projects" | "domains" | "billing" | "profile" | "admin";
+  active: "create" | "projects" | "domains" | "billing" | "profile" | "notifications" | "admin";
   label: string;
   onNavigate: (path: string) => void;
 }) {

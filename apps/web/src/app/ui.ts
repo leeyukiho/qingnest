@@ -20,5 +20,5 @@ export const AUTH_TOGGLE_ACTIVE_CLASS =
   "border-white bg-white text-black";
 export const AUTH_TOGGLE_INACTIVE_CLASS = "border-transparent text-zinc-300 hover:bg-white hover:text-black";
 export const BRAND_LAYOUT_ID = "qingnest-wordmark";
-export const LAST_HOME_PAGE_INDEX = 2;
+export const LAST_HOME_PAGE_INDEX = 1;
 export const HERO_VANISH_FALLBACK_MS = 2800;

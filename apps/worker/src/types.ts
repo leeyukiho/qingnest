@@ -16,6 +16,8 @@ export type Env = {
   CLOUDFLARE_ZONE_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
   CLOUDFLARE_WORKER_SCRIPT?: string;
+  CLOUDFLARE_R2_BUCKET_NAME?: string;
+  CLOUDFLARE_KV_NAMESPACE_ID?: string;
 };
 
 export type ApiResponse<T> = {

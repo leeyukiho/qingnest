@@ -892,9 +892,9 @@ export function ProjectDetailPage({
                 confirmAction?.type === "delete"
                   ? `项目“${project?.name ?? ""}”将被永久删除，已租赁域名会保留并解绑。此操作无法撤销。`
                   : confirmAction?.type === "unbind"
-                    ? `解绑后，${confirmAction.slot.hostname} 将暂时无法访问。`
+                    ? `解绑后，${confirmAction.slot.hostname} 将暂时无法访问，但可立即绑定到其他项目。`
                     : confirmAction?.type === "bind"
-                      ? `切换后，${confirmAction.slot.hostname} 的访客将看到当前项目。`
+                      ? `切换后，${confirmAction.slot.hostname} 的访客将看到当前项目，之后 24 小时内不能再次换绑或解绑。`
                       : ""
               }
               destructive={

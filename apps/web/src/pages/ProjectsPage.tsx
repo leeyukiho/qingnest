@@ -6,6 +6,7 @@ import { ToastMessage } from "@/app/toast";
 import { getStatusLabel } from "@/app/deployment-view";
 import { StudioLoading } from "@/app/feedback";
 import { STUDIO_DOMAINS_PATH, STUDIO_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_PANEL_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
 import { getCachedProjects, listProjects, type AccountProfile, type ProjectSummary } from "@/lib/api";
 
@@ -19,6 +20,9 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
   const [projects, setProjects] = useState<ProjectSummary[]>(cachedProjects ?? []);
   const [loading, setLoading] = useState(!cachedProjects);
   const [error, setError] = useState<string | null>(null);
+  const plan = account?.planConfig ?? getPlanConfig(account?.plan);
+  const overageCount = Math.max(0, projects.length - plan.quotas.user.maxSites);
+  const projectLimitReached = projects.length >= plan.quotas.user.maxSites;
   const sortedProjects = [...projects].sort((left, right) => {
     if (left.visibility !== right.visibility) return left.visibility === "public" ? -1 : 1;
     return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
@@ -39,12 +43,15 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
           <div className={STUDIO_MAIN_CLASS}>
             <div className={STUDIO_HEADER_CLASS}>
               <h1 className={STUDIO_TITLE_CLASS}>我的项目</h1>
-              <button className={STUDIO_SECONDARY_BUTTON_CLASS} onClick={() => onNavigate(STUDIO_PATH)} type="button">
+              <button className={`${STUDIO_SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:border-white/10 disabled:text-zinc-600 disabled:hover:bg-black disabled:hover:text-zinc-600`} disabled={projectLimitReached} onClick={() => onNavigate(STUDIO_PATH)} title={projectLimitReached ? `当前套餐最多创建 ${plan.quotas.user.maxSites} 个项目` : undefined} type="button">
                 <Plus className="h-4 w-4" />新建项目
               </button>
             </div>
 
             <ToastMessage message={error} />
+            <div className="mt-3 min-h-5" aria-live="polite">
+              {overageCount > 0 ? <p className="text-sm font-medium text-red-400">已超出套餐额度 {overageCount} 个项目。<button className="ml-1 underline underline-offset-4 transition-colors hover:text-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300" onClick={() => onNavigate("/pricing")} type="button">升级套餐</button></p> : null}
+            </div>
             {!loading && projects.length === 0 ? (
               <div className={`${STUDIO_PANEL_CLASS} mt-5 flex min-h-64 flex-col items-center justify-center p-8 text-center`}>
                 <FolderKanban className="h-7 w-7 text-zinc-500" />

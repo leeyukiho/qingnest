@@ -4,6 +4,10 @@ compatibility_date = "2026-07-05"
 keep_vars = true
 workers_dev = false
 
+[vars]
+CLOUDFLARE_R2_BUCKET_NAME = "qingnest-sites-dev"
+CLOUDFLARE_KV_NAMESPACE_ID = "a363acec72534db49c2b449202cb1f81"
+
 [triggers]
 crons = ["*/15 * * * *"]
 

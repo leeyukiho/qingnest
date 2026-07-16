@@ -43,6 +43,83 @@ async function assertAdmin(env: Env, user: AuthenticatedUser) {
 function usageDate() { return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10); }
 function monthStart() { return usageDate().slice(0, 7) + "-01"; }
 
+type ProviderMetric = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB";
+type ProviderSample = Record<ProviderMetric, number>;
+
+const providerColumns: Record<ProviderMetric, string> = {
+  workerRequests: "worker_requests",
+  kvReads: "kv_reads",
+  kvWrites: "kv_writes",
+  r2StorageBytes: "r2_storage_bytes",
+  r2ClassA: "r2_class_a",
+  r2ClassB: "r2_class_b",
+};
+
+const r2ClassAActions = new Set(["ListBuckets", "PutBucket", "ListObjects", "PutObject", "CopyObject", "CompleteMultipartUpload", "CreateMultipartUpload", "ListMultipartUploads", "ListParts", "UploadPart", "UploadPartCopy"]);
+const r2ClassBActions = new Set(["HeadBucket", "HeadObject", "GetObject"]);
+
+function sumGroups(groups: any[] | undefined) {
+  return (groups ?? []).reduce((sum, group) => sum + Number(group.sum?.requests ?? 0), 0);
+}
+
+function sumActions(groups: any[] | undefined, actions: Set<string>) {
+  return (groups ?? []).reduce((sum, group) => actions.has(String(group.dimensions?.actionType)) ? sum + Number(group.sum?.requests ?? 0) : sum, 0);
+}
+
+async function fetchCloudflareCapacity(env: Env): Promise<ProviderSample> {
+  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_WORKER_SCRIPT) {
+    throw new Error("Cloudflare Analytics credentials are not configured");
+  }
+  const now = new Date();
+  const start = `${monthStart()}T00:00:00.000Z`;
+  const query = `query Capacity($accountTag: string!, $start: Time!, $end: Time!, $startDate: Date!, $endDate: Date!, $scriptName: string!, $bucketName: string, $namespaceId: string) {
+    viewer { accounts(filter: { accountTag: $accountTag }) {
+      workersInvocationsAdaptive(limit: 10000, filter: { scriptName: $scriptName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } }
+      kvOperationsAdaptiveGroups(limit: 10000, filter: { namespaceId: $namespaceId, date_geq: $startDate, date_leq: $endDate }) { sum { requests } dimensions { actionType } }
+      r2OperationsAdaptiveGroups(limit: 10000, filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } dimensions { actionType } }
+      r2StorageAdaptiveGroups(limit: 1, orderBy: [datetime_DESC], filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { max { payloadSize metadataSize } }
+    } }
+  }`;
+  const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({ query, variables: { accountTag: env.CLOUDFLARE_ACCOUNT_ID, start, end: now.toISOString(), startDate: monthStart(), endDate: usageDate(), scriptName: env.CLOUDFLARE_WORKER_SCRIPT, bucketName: env.CLOUDFLARE_R2_BUCKET_NAME ?? null, namespaceId: env.CLOUDFLARE_KV_NAMESPACE_ID ?? null } }),
+  });
+  const body = await response.json() as any;
+  if (!response.ok || body.errors?.length) throw new Error(body.errors?.[0]?.message ?? `Cloudflare Analytics returned ${response.status}`);
+  const account = body.data?.viewer?.accounts?.[0];
+  if (!account) throw new Error("Cloudflare Analytics returned no account data");
+  const kv = account.kvOperationsAdaptiveGroups ?? [];
+  const r2 = account.r2OperationsAdaptiveGroups ?? [];
+  const storage = account.r2StorageAdaptiveGroups?.[0]?.max;
+  return {
+    workerRequests: sumGroups(account.workersInvocationsAdaptive),
+    kvReads: sumActions(kv, new Set(["read"])),
+    kvWrites: sumActions(kv, new Set(["write", "delete", "list"])),
+    r2StorageBytes: Number(storage?.payloadSize ?? 0) + Number(storage?.metadataSize ?? 0),
+    r2ClassA: sumActions(r2, r2ClassAActions),
+    r2ClassB: sumActions(r2, r2ClassBActions),
+  };
+}
+
+async function refreshProviderCapacity(env: Env, db: any) {
+  const sampledAt = new Date().toISOString();
+  try {
+    const sample = await fetchCloudflareCapacity(env);
+    const { error } = await db.from("infrastructure_usage_monthly").upsert({ month_start: monthStart(), ...Object.fromEntries(Object.entries(sample).map(([key, value]) => [providerColumns[key as ProviderMetric], value])), provider_sampled_at: sampledAt, provider_sample_error: null, updated_at: sampledAt });
+    if (error) throw new Error(error.message);
+    return sample;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await db.from("infrastructure_usage_monthly").upsert({ month_start: monthStart(), provider_sample_error: message.slice(0, 500), updated_at: sampledAt });
+    return null;
+  }
+}
+
+function providerObserved(usage: any): Pick<CapacityLimits, ProviderMetric> {
+  return Object.fromEntries(Object.entries(providerColumns).map(([key, column]) => [key, Number(usage?.[column] ?? 0)])) as Pick<CapacityLimits, ProviderMetric>;
+}
+
 export async function recordPagesDeployment(env: Env, failed = false) {
   const db = createServiceSupabase(env) as any;
   const month = monthStart();
@@ -53,12 +130,10 @@ export async function recordPagesDeployment(env: Env, failed = false) {
 export async function getCapacityDashboard(env: Env, user: AuthenticatedUser) {
   await assertAdmin(env, user);
   const db = createServiceSupabase(env) as any;
-  const [{ data: settings }, { data: usage }, { data: acceleration }, { data: storedDeployments }, { data: monthlyDeployments }, { data: resendUsage }] = await Promise.all([
+  const [{ data: settings }, { data: usage }, { data: acceleration }, { data: resendUsage }] = await Promise.all([
     db.from("infrastructure_capacity_settings").select("*").eq("id", true).single(),
     db.from("infrastructure_usage_monthly").select("*").eq("month_start", monthStart()).maybeSingle(),
     db.from("pages_accelerations").select("status, pages_project_name"),
-    db.from("deployments").select("total_bytes").not("status", "in", '(failed,superseded)'),
-    db.from("deployments").select("file_count").gte("created_at", monthStart()),
     db.from("resend_email_usage_daily").select("usage_date, sent_count").gte("usage_date", monthStart()),
   ]);
   const accelerated = (acceleration ?? []).filter((item: any) => item.status === "accelerated").length;
@@ -66,15 +141,13 @@ export async function getCapacityDashboard(env: Env, user: AuthenticatedUser) {
   const resendEmailsDaily = Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0);
   const resendEmailsMonthly = (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0);
   const observed = {
-    workerRequests: 0, kvReads: 0, kvWrites: 0,
-    r2StorageBytes: (storedDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.total_bytes ?? 0), 0),
-    r2ClassA: (monthlyDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.file_count ?? 0), 0),
-    r2ClassB: 0, pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: projects, resendEmailsDaily, resendEmailsMonthly,
+    ...providerObserved(usage),
+    pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: projects, resendEmailsDaily, resendEmailsMonthly,
   };
   const preset = capacityPresets[settings.stage as CapacityStage] ?? capacityPresets.workers_paid;
   const resendPlan = resendPresets[settings.resend_plan as ResendPlan] ? settings.resend_plan as ResendPlan : "free";
   const savedThresholds = settings.thresholds ?? thresholds(settings.warning_percent, settings.critical_percent);
-  return { settings: { stage: settings.stage, resendPlan, limits: planLimits(settings.stage as CapacityStage, resendPlan), thresholds: { ...preset.thresholds, ...savedThresholds }, notificationCooldownHours: settings.notification_cooldown_hours, updatedAt: settings.updated_at }, observed, acceleratedSites: accelerated, sampledAt: new Date().toISOString(), presets: capacityPresets, resendPresets, scopeNote: "这里只展示可能触发套餐升级或按量账单的容量指标。Pages、R2 写入与 Resend 邮件来自平台记录；Worker、KV、R2 读取需接入 Cloudflare Analytics 后显示，未采集时为 0。Cloudflare API 请求与失败属于运行健康数据，不参与成本预警。Resend 付费版没有日发送上限，因此仅按月额度预警。" };
+  return { settings: { stage: settings.stage, resendPlan, limits: planLimits(settings.stage as CapacityStage, resendPlan), thresholds: { ...preset.thresholds, ...savedThresholds }, notificationCooldownHours: settings.notification_cooldown_hours, updatedAt: settings.updated_at }, observed, acceleratedSites: accelerated, sampledAt: usage?.provider_sampled_at ?? new Date().toISOString(), providerSample: { available: Boolean(usage?.provider_sampled_at), sampledAt: usage?.provider_sampled_at ?? null, error: usage?.provider_sample_error ?? null, intervalHours: 6, includesAdminTraffic: true }, presets: capacityPresets, resendPresets, scopeNote: "Worker、KV 与 R2 指标来自 Cloudflare GraphQL，每 6 小时最多采样一次；Pages 与 Resend 来自平台成功记录。所有账户级资源消耗均包含管理员操作产生的流量。供应商采样不可用时会明确显示状态，不会把 0 当成实时用量。" };
 }
 
 export async function updateCapacitySettings(env: Env, user: AuthenticatedUser, input: any) {
@@ -95,16 +168,15 @@ export async function updateCapacitySettings(env: Env, user: AuthenticatedUser, 
 
 export async function evaluateCapacityAlerts(env: Env) {
   const db = createServiceSupabase(env) as any;
-  const [{ data: settings }, { data: usage }, { data: acceleration }, { data: storedDeployments }, { data: monthlyDeployments }, { data: resendUsage }] = await Promise.all([
+  await refreshProviderCapacity(env, db);
+  const [{ data: settings }, { data: usage }, { data: acceleration }, { data: resendUsage }] = await Promise.all([
     db.from("infrastructure_capacity_settings").select("*").eq("id", true).maybeSingle(),
     db.from("infrastructure_usage_monthly").select("*").eq("month_start", monthStart()).maybeSingle(),
     db.from("pages_accelerations").select("pages_project_name"),
-    db.from("deployments").select("total_bytes").not("status", "in", '(failed,superseded)'),
-    db.from("deployments").select("file_count").gte("created_at", monthStart()),
     db.from("resend_email_usage_daily").select("usage_date, sent_count").gte("usage_date", monthStart()),
   ]);
   if (!settings) return;
-  const observed: Partial<CapacityLimits> = { r2StorageBytes: (storedDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.total_bytes ?? 0), 0), r2ClassA: (monthlyDeployments ?? []).reduce((sum: number, item: any) => sum + Number(item.file_count ?? 0), 0), pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: (acceleration ?? []).filter((item: any) => item.pages_project_name).length, resendEmailsDaily: Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0), resendEmailsMonthly: (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0) };
+  const observed: Partial<CapacityLimits> = { ...providerObserved(usage), pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: (acceleration ?? []).filter((item: any) => item.pages_project_name).length, resendEmailsDaily: Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0), resendEmailsMonthly: (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0) };
   const cooldownMs = Number(settings.notification_cooldown_hours) * 3_600_000;
   const resendPlan = resendPresets[settings.resend_plan as ResendPlan] ? settings.resend_plan as ResendPlan : "free";
   const limits = planLimits(settings.stage as CapacityStage, resendPlan);

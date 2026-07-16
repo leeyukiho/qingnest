@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const formatDate = (value: string) => new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 
-export function NotificationCenter({ enabled }: { enabled: boolean }) {
+export function NotificationCenter({ enabled, variant = "icon" }: { enabled: boolean; variant?: "icon" | "sidebar" }) {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,11 +58,11 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
 
   return <>
     <div className="relative z-[70]">
-      <button aria-label="查看通知" className="relative flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-zinc-950/95 text-zinc-300 shadow-xl backdrop-blur transition-colors hover:border-white/30 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70" onClick={() => setOpen((value) => !value)} type="button">
+      <button aria-label="查看通知" className={cn("relative flex items-center rounded-md border text-zinc-300 transition-colors hover:border-white/20 hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70", variant === "sidebar" ? "min-w-36 gap-3 border-transparent px-3 py-2.5 text-left lg:min-w-0" : "h-10 w-10 justify-center border-white/15 bg-zinc-950/95 shadow-xl backdrop-blur")} onClick={() => setOpen((value) => !value)} type="button">
         <Bell className="h-4 w-4" />
-        {unreadCount ? <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">{Math.min(unreadCount, 99)}</span> : null}
+        {variant === "sidebar" ? <><span className="min-w-0 flex-1 truncate text-sm font-medium">通知</span>{unreadCount ? <span className="flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">{Math.min(unreadCount, 99)}</span> : null}</> : unreadCount ? <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">{Math.min(unreadCount, 99)}</span> : null}
       </button>
-      {open ? <section aria-label="通知列表" className="absolute right-0 mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-md border border-white/15 bg-zinc-950 shadow-2xl">
+      {open ? <section aria-label="通知列表" className={cn("absolute mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-md border border-white/15 bg-zinc-950 shadow-2xl", variant === "sidebar" ? "left-0 lg:bottom-0 lg:left-[calc(100%+1rem)] lg:mt-0" : "right-0")}>
         <header className="flex h-12 items-center justify-between border-b border-white/10 px-4"><h2 className="text-sm font-semibold text-white">通知</h2><span className="text-xs text-zinc-500">{items.length} 条</span></header>
         <div className="max-h-[min(32rem,70vh)] overflow-y-auto">{items.length ? items.map((item) => <article className="border-b border-white/10 px-4 py-3 last:border-0" key={item.id}>
           <div className="flex items-start gap-3"><span className={cn("mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md", item.acknowledgedAt ? "bg-white/5 text-zinc-600" : "bg-cyan-400/10 text-cyan-300")}>{item.acknowledgedAt ? <Check className="h-4 w-4" /> : <Mail className="h-4 w-4" />}</span><div className="min-w-0"><h3 className="text-sm font-medium text-zinc-100">{item.title}</h3><p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-400">{item.body}</p><p className="mt-2 text-xs text-zinc-600">{formatDate(item.createdAt)} · {item.audience === "all" ? "平台公告" : "发给你"}</p></div></div>

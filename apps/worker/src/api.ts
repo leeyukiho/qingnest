@@ -25,6 +25,7 @@ import {
   listPublicSlots,
   rentPublicSlot,
   listPlatformDomainCatalog,
+  listPublicPlans,
   switchPublicSlot,
   updateAdminSite,
   updateAdminUser,
@@ -164,6 +165,12 @@ export async function handleApi(request: Request, env: Env) {
         plans: {
           free: platformConfig.plans.free,
         },
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/plans") {
+      return json(await listPublicPlans(env), {
+        headers: { "cache-control": "public, max-age=300, s-maxage=21600, stale-while-revalidate=86400" },
       });
     }
 

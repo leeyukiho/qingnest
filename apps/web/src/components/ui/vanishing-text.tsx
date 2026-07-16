@@ -104,19 +104,27 @@ export function VanishingText({
   const particlesRef = useRef<Particle[]>([]);
   const completedRef = useRef(false);
   const canvasScaleRef = useRef(1);
+  const onCompleteRef = useRef(onComplete);
+  const onNearCompleteRef = useRef(onNearComplete);
+
+  useLayoutEffect(() => {
+    onCompleteRef.current = onComplete;
+    onNearCompleteRef.current = onNearComplete;
+  }, [onComplete, onNearComplete]);
+
   const complete = useCallback(() => {
     if (!completedRef.current) {
       completedRef.current = true;
-      onComplete?.();
+      onCompleteRef.current?.();
     }
-  }, [onComplete]);
+  }, []);
 
   const nearComplete = useCallback(() => {
     if (nearCompletedRef.current) return;
 
     nearCompletedRef.current = true;
-    onNearComplete?.();
-  }, [onNearComplete]);
+    onNearCompleteRef.current?.();
+  }, []);
 
   const draw = useCallback((captureParticles = false) => {
     const canvas = canvasRef.current;

@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  Check,
   CreditCard,
   Database,
   FolderKanban,
@@ -11,7 +12,7 @@ import {
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { formatBytes } from "@/app/deployment-view";
-import { STUDIO_DOMAIN_PURCHASE_PATH } from "@/app/navigation";
+import { PRICING_PATH, STUDIO_DOMAIN_PURCHASE_PATH } from "@/app/navigation";
 import {
   STUDIO_CONTENT_SHELL_CLASS,
   STUDIO_HEADER_CLASS,
@@ -32,15 +33,13 @@ export function BillingPage({
   const plan = account?.planConfig ?? getPlanConfig(account?.plan);
   const usage = account?.usage;
   const items = [
-    [FolderKanban, "项目", usage?.sites ?? 0, plan.quotas.user.maxSites],
+    ["项目", usage?.sites ?? 0, plan.quotas.user.maxSites],
     [
-      Globe2,
       "公开站点",
       usage?.publicSites ?? 0,
       plan.quotas.user.maxPublicSites,
     ],
     [
-      Database,
       "存储",
       formatBytes(usage?.storageBytes ?? 0),
       formatBytes(plan.quotas.user.maxStorageBytes),
@@ -71,7 +70,33 @@ export function BillingPage({
       value: `${plan.quotas.user.maxUploadSessionsPerHour} 次 / 小时`,
       description: "为频繁更新留出充足空间，达到上限后下一小时自动恢复。",
     },
+    {
+      icon: Database,
+      title: "单站点大小",
+      value: formatBytes(plan.quotas.site.maxSiteBytes),
+      description: `每个站点最多 ${plan.quotas.deployment.maxFiles.toLocaleString()} 个文件，发布时会校验站点总体积。`,
+    },
+    {
+      icon: Globe2,
+      title: "域名绑定",
+      value: `${plan.quotas.site.maxDomainsPerSite} 个 / 项目`,
+      description: "平台地址与自定义域名共用项目绑定额度，自定义域名是否可用取决于套餐能力。",
+    },
+    {
+      icon: Layers3,
+      title: "流量与带宽",
+      value: "不限量",
+      description: "不按访问流量或传输带宽收费；异常流量、攻击和滥用仍受公平使用与自动保护策略约束。",
+    },
   ] as const;
+  const capabilities = [
+    ["customDomain", "自定义域名"],
+    ["passwordProtection", "访问密码保护"],
+    ["accessAnalytics", "访问数据分析"],
+    ["removeBranding", "移除平台标识"],
+    ["rollback", "历史版本回滚"],
+    ["sourceBuild", "源码构建发布"],
+  ].filter(([key]) => plan.capabilities[key as keyof typeof plan.capabilities]);
   return (
     <div className="min-h-dvh bg-black">
       <section className={STUDIO_SECTION_CLASS}>
@@ -90,9 +115,9 @@ export function BillingPage({
                 </p>
               </div>
             </div>
-            <div className="mt-5 grid gap-5 xl:grid-cols-2">
+            <div className="mt-5">
               <section
-                className={`${STUDIO_PANEL_CLASS} flex min-h-72 flex-col p-5 sm:p-6`}
+                className="hidden"
               >
                 <div className="flex items-start gap-3">
                   <CreditCard className="mt-0.5 h-5 w-5 text-zinc-400" />
@@ -102,22 +127,18 @@ export function BillingPage({
                     <p className="mt-2 whitespace-nowrap text-sm text-zinc-500">掌握项目、站点和存储用量。</p>
                   </div>
                 </div>
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  {items.map(([Icon, label, current, limit]) => (
-                    <div
-                      className="rounded-md border border-white/10 p-4"
-                      key={label}
-                    >
-                      <Icon className="h-4 w-4 text-zinc-500" />
-                      <p className="mt-3 text-xs text-zinc-500">{label}</p>
-                      <p className="mt-1 break-words text-sm font-semibold tabular-nums">
+                <div className="mt-6 grid grid-cols-1 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 sm:grid-cols-3">
+                  {items.map(([label, current, limit]) => (
+                    <div className="bg-black p-4" key={label}>
+                      <p className="text-xs text-zinc-500">{label}</p>
+                      <p className="mt-2 break-words text-sm font-medium tabular-nums">
                         {current} / {limit}
                       </p>
                     </div>
                   ))}
                 </div>
-                <p className="mt-auto border-t border-white/10 pt-5 text-xs text-zinc-600">在线升级和付款正在接入，目前不会自动扣费。</p>
-                <button className="mt-3 inline-flex h-9 w-fit items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-zinc-300" onClick={() => onNavigate("/#pricing")} type="button">
+                <p className="mt-6 border-t border-white/10 pt-5 text-xs text-zinc-600">在线升级和付款正在接入，目前不会自动扣费。</p>
+                <button className="mt-3 inline-flex h-9 w-fit cursor-pointer items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60" onClick={() => onNavigate(PRICING_PATH)} type="button">
                   查看其他收费计划
                   <ArrowRight className="h-4 w-4" />
                 </button>
@@ -133,7 +154,7 @@ export function BillingPage({
                     <p className="mt-2 whitespace-nowrap text-sm text-zinc-500">为网站选择更好记的公开地址。</p>
                   </div>
                 </div>
-                <div className="mt-6 grid grid-cols-3 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10">
+                <div className="mt-6 grid grid-cols-1 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 sm:grid-cols-3">
                   <div className="bg-black p-4">
                     <p className="text-xs text-zinc-500">地址选择</p>
                     <p className="mt-2 text-sm font-medium">多个后缀</p>
@@ -147,9 +168,9 @@ export function BillingPage({
                     <p className="mt-2 text-sm font-medium">独立购买</p>
                   </div>
                 </div>
-                <p className="mt-auto border-t border-white/10 pt-5 text-xs text-zinc-600">域名与资源套餐分开计费，套餐变更不影响已租地址。</p>
+                <p className="mt-6 border-t border-white/10 pt-5 text-xs text-zinc-600">域名与资源套餐分开计费，套餐变更不影响已租地址。</p>
                 <button
-                  className="mt-3 inline-flex h-9 w-fit items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-zinc-300"
+                  className="mt-3 inline-flex h-9 w-fit cursor-pointer items-center gap-2 text-sm font-semibold text-white transition-colors hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                   onClick={() => onNavigate(STUDIO_DOMAIN_PURCHASE_PATH)}
                   type="button"
                 >
@@ -173,6 +194,19 @@ export function BillingPage({
                   </div>
                 ))}
               </dl>
+              {capabilities.length ? (
+                <div className="mt-5 border-t border-white/10 pt-5">
+                  <p className="text-xs font-medium text-zinc-500">套餐能力</p>
+                  <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {capabilities.map(([, label]) => (
+                      <li className="flex items-center gap-2 text-sm text-zinc-300" key={label}>
+                        <Check className="h-4 w-4 shrink-0 text-emerald-400" />
+                        {label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </section>
           </div>
         </div>

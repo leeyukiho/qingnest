@@ -20,7 +20,13 @@ export default {
 
     return handleSiteRequest(request, env, context);
   },
-  async scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
-    context.waitUntil(Promise.all([runTrafficLifecycle(env), evaluateCapacityAlerts(env), syncPlatformDomains(env)]));
+  async scheduled(controller: ScheduledController, env: Env, context: ExecutionContext) {
+    const scheduledAt = new Date(controller.scheduledTime);
+    const capacityDue = scheduledAt.getUTCMinutes() === 0 && scheduledAt.getUTCHours() % 6 === 0;
+    context.waitUntil(Promise.all([
+      runTrafficLifecycle(env),
+      capacityDue ? evaluateCapacityAlerts(env) : Promise.resolve(),
+      syncPlatformDomains(env),
+    ]));
   },
 };

@@ -37,6 +37,20 @@ type DraftSite = {
   visibility: "private" | "public";
 };
 
+let publicPlansCache: { data: Database["public"]["Tables"]["plan_catalog"]["Row"][]; expiresAt: number } | null = null;
+const PUBLIC_PLANS_CACHE_MS = 5 * 60_000;
+
+export async function listPublicPlans(env: Env) {
+  if (publicPlansCache && publicPlansCache.expiresAt > Date.now()) return publicPlansCache.data;
+  if (!hasServiceSupabase(env)) return [];
+
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await supabase.from("plan_catalog").select("*").eq("enabled", true).order("monthly_price_cents");
+  if (error) throw new Error(error.message);
+  publicPlansCache = { data: data ?? [], expiresAt: Date.now() + PUBLIC_PLANS_CACHE_MS };
+  return publicPlansCache.data;
+}
+
 export type ProjectSummary = DraftSite & {
   createdAt: string;
   updatedAt: string;
@@ -70,6 +84,7 @@ export type PublicSlot = {
   publicUrl: string;
   type: "platform_subdomain" | "custom_domain";
   status: "active" | "pending_review" | "blocked";
+  expiresAt: string;
 };
 
 type MemoryUploadSession = {
@@ -102,6 +117,7 @@ export type AccountProfile = {
   emailConfirmed: boolean;
   role: ProfileRole;
   plan: string;
+  subscriptionExpiresAt: string | null;
   planConfig: ReturnType<typeof getPlanConfig>;
   createdAt: string;
   usage: {
@@ -952,7 +968,7 @@ export async function getAccountProfile(
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
     .from("profiles")
-    .select("email, plan, role, created_at")
+    .select("email, plan, role, plan_expires_at, created_at")
     .eq("id", user.id)
     .single();
 
@@ -1005,6 +1021,7 @@ export async function getAccountProfile(
     emailConfirmed: user.emailConfirmed,
     role: data.role,
     plan: data.plan,
+    subscriptionExpiresAt: data.plan_expires_at,
     planConfig: await getEffectivePlanConfig(env, data.plan),
     createdAt: data.created_at,
     usage: {
@@ -1121,7 +1138,7 @@ async function getEffectivePlanConfig(env: Env, planKey: string | null | undefin
     quotas: {
       ...fallback.quotas,
       user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day, maxUploadSessionsPerHour: data.max_upload_sessions_per_hour },
-      site: { ...fallback.quotas.site, maxDomainsPerSite: data.max_domains_per_site },
+      site: { ...fallback.quotas.site, maxSiteBytes: Number(data.max_site_bytes), maxDomainsPerSite: data.max_domains_per_site },
       deployment: { ...fallback.quotas.deployment, maxFiles: data.max_files },
     },
     capabilities: { customDomain: data.custom_domain, passwordProtection: data.password_protection, accessAnalytics: data.access_analytics, removeBranding: data.remove_branding, rollback: data.rollback, sourceBuild: data.source_build },
@@ -1211,6 +1228,7 @@ export async function updateAdminPlan(env: Env, user: AuthenticatedUser, key: st
   delete update.key;
   const { data, error } = await supabase.from("plan_catalog").update({ ...update, updated_at: new Date().toISOString() }).eq("key", key).select("*").single();
   if (error) throw new Error(error.message);
+  publicPlansCache = null;
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.plan.updated", message: `管理员更新套餐 ${key}` });
   return data;
 }
@@ -1650,7 +1668,7 @@ export async function listPublicSlots(
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
     .from("domains")
-    .select("id, site_id, hostname, type, status")
+    .select("id, site_id, hostname, type, status, expires_at")
     .eq("user_id", user.id)
     .neq("status", "deleted")
     .order("created_at", { ascending: true });
@@ -1661,6 +1679,7 @@ export async function listPublicSlots(
     hostname: domain.hostname,
     publicUrl: getPublicUrlFromHostname(env, domain.hostname),
     type: domain.type,
+    expiresAt: domain.expires_at,
     status:
       domain.status === "blocked"
         ? "blocked"
@@ -1817,17 +1836,17 @@ export async function switchPublicSlot(
     return (await listPublicSlots(env, input.user)).find(
       (slot) => slot.id === domain.id,
     )!;
-  const cooldownMs = 10 * 60 * 1000;
+  const cooldownMs = 24 * 60 * 60 * 1000;
   const lastChange = domain.last_binding_change_at
     ? Date.parse(domain.last_binding_change_at)
     : 0;
-  if (lastChange && Date.now() - lastChange < cooldownMs) {
-    const remainingMinutes = Math.max(
+  if (domain.site_id && lastChange && Date.now() - lastChange < cooldownMs) {
+    const remainingHours = Math.max(
       1,
-      Math.ceil((cooldownMs - (Date.now() - lastChange)) / 60_000),
+      Math.ceil((cooldownMs - (Date.now() - lastChange)) / 3_600_000),
     );
     throw new Error(
-      `该平台地址刚刚发生过绑定变更，请 ${remainingMinutes} 分钟后再试`,
+      `该平台地址绑定或换绑后 24 小时内不能再次操作，请 ${remainingHours} 小时后再试`,
     );
   }
   if (!input.siteId) {
@@ -1835,7 +1854,7 @@ export async function switchPublicSlot(
       .from("domains")
       .update({
         site_id: null,
-        last_binding_change_at: new Date().toISOString(),
+        last_binding_change_at: null,
       })
       .eq("id", domain.id)
       .eq("user_id", input.user.id);

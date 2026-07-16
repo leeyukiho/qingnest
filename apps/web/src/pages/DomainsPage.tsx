@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
+  ChevronDown,
   ExternalLink,
   FolderKanban,
   Globe2,
@@ -137,7 +138,7 @@ export function DomainsPage({
               <div>
                 <h1 className={STUDIO_TITLE_CLASS}>域名</h1>
                 <p className="mt-2 text-sm text-zinc-500">
-                  管理已租赁和平台赠送的域名。绑定变更后 10 分钟内不能再次修改。
+                  管理已租赁和平台赠送的域名。绑定或换绑后 24 小时内不能再次操作；解绑后可立即绑定其他项目。
                 </p>
               </div>
               <button
@@ -188,7 +189,7 @@ export function DomainsPage({
                     : null;
                   return (
                     <div
-                      className="grid gap-4 border-b border-white/10 p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center"
+                      className="grid gap-4 border-b border-white/10 p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_15rem] md:items-center"
                       key={slot.id}
                     >
                       <div className="min-w-0">
@@ -201,12 +202,13 @@ export function DomainsPage({
                             ? "自定义域名"
                             : "平台域名"}
                         </p>
+                        <p className="mt-1 text-xs text-zinc-600">有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</p>
                       </div>
-                      <div className="min-w-0">
+                      <div className="grid min-w-0 grid-rows-[1rem_2.25rem] gap-1">
                         <p className="text-xs text-zinc-600">绑定项目</p>
                         {project ? (
                           <button
-                            className="mt-1 flex max-w-full cursor-pointer items-center gap-2 text-left text-sm text-zinc-200 hover:text-white"
+                            className="flex h-9 max-w-full cursor-pointer items-center gap-2 text-left text-sm text-zinc-200 hover:text-white"
                             onClick={() =>
                               onNavigate(
                                 `${STUDIO_PROJECTS_PATH}/${project.id}`,
@@ -218,40 +220,51 @@ export function DomainsPage({
                             <span className="truncate">{project.name}</span>
                           </button>
                         ) : (
-                          <div className="mt-1 flex min-w-0 items-center gap-2">
+                          <div className="flex h-9 min-w-0 items-center gap-2 text-zinc-200 hover:text-white">
                             {bindingSlotId === slot.id ? (
                               <Loader2 className="h-4 w-4 shrink-0 animate-spin text-zinc-400" />
                             ) : (
                               <Link2 className="h-4 w-4 shrink-0 text-zinc-500" />
                             )}
-                            <select
-                              aria-label={`为 ${slot.hostname} 选择绑定项目`}
-                              className="h-9 min-w-0 max-w-full cursor-pointer rounded-md border border-white/15 bg-black px-2 text-sm text-zinc-200 outline-none focus:border-white/40 disabled:cursor-not-allowed disabled:text-zinc-600"
-                              disabled={
-                                bindingSlotId !== null ||
-                                bindableProjects.length === 0
-                              }
-                              onChange={(event) => {
-                                const siteId = event.target.value;
-                                if (siteId) setPendingBinding({ slot, siteId });
-                              }}
-                              value=""
-                            >
-                              <option value="">
-                                {bindableProjects.length > 0
-                                  ? "选择未绑定项目"
-                                  : "暂无可绑定项目"}
-                              </option>
-                              {bindableProjects.map((candidate) => (
-                                <option key={candidate.id} value={candidate.id}>
-                                  {candidate.name}
+                            <div className="relative min-w-0 max-w-full">
+                              <select
+                                aria-label={`为 ${slot.hostname} 选择绑定项目`}
+                                className="h-9 max-w-full cursor-pointer appearance-none bg-transparent py-0 pl-0 pr-6 text-sm text-current outline-none disabled:cursor-not-allowed disabled:text-zinc-600"
+                                disabled={
+                                  bindingSlotId !== null ||
+                                  bindableProjects.length === 0
+                                }
+                                onChange={(event) => {
+                                  const siteId = event.target.value;
+                                  if (siteId)
+                                    setPendingBinding({ slot, siteId });
+                                }}
+                                value=""
+                              >
+                                <option
+                                  className="bg-zinc-950 text-zinc-500"
+                                  value=""
+                                >
+                                  {bindableProjects.length > 0
+                                    ? "选择未绑定项目"
+                                    : "暂无可绑定项目"}
                                 </option>
-                              ))}
-                            </select>
+                                {bindableProjects.map((candidate) => (
+                                  <option
+                                    className="bg-zinc-950 text-zinc-200"
+                                    key={candidate.id}
+                                    value={candidate.id}
+                                  >
+                                    {candidate.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                            </div>
                           </div>
                         )}
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2 md:justify-end">
                         <a
                           className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5"
                           href={slot.publicUrl}
@@ -292,8 +305,8 @@ export function DomainsPage({
                     {displayHostname(editingSlot.hostname)}
                   </p>
                   <p className="mt-3 text-sm leading-6 text-zinc-500">
-                    选择操作后还需要再次确认。每次变更后需等待 10
-                    分钟才能再次修改。
+                    选择操作后还需要再次确认。绑定或换绑后需等待 24
+                    小时才能再次操作；解绑后可立即绑定其他项目。
                   </p>
                   <select
                     aria-label="选择新的绑定项目"
@@ -380,7 +393,9 @@ export function DomainsPage({
                     </div>
                   </dl>
                   <p className="mt-4 text-sm leading-6 text-zinc-500">
-                    确认后会立即生效，并在 10 分钟内禁止再次修改该地址的绑定。
+                    {pendingBinding.siteId
+                      ? "确认后会立即生效，之后 24 小时内不能再次换绑或解绑。"
+                      : "确认后会立即生效，且可立即将该地址绑定到其他项目。"}
                   </p>
                   <div className="mt-5 flex justify-end gap-2">
                     <button

@@ -6,7 +6,9 @@ export const STUDIO_DOMAINS_PATH = `${STUDIO_PATH}/domains`;
 export const STUDIO_DOMAIN_PURCHASE_PATH = `${STUDIO_DOMAINS_PATH}/purchase`;
 export const STUDIO_BILLING_PATH = `${STUDIO_PATH}/billing`;
 export const STUDIO_PROFILE_PATH = `${STUDIO_PATH}/profile`;
+export const STUDIO_NOTIFICATIONS_PATH = `${STUDIO_PATH}/notifications`;
 export const STUDIO_ADMIN_PATH = "/admin";
+export const PRICING_PATH = "/pricing";
 
 export type AppLocation = {
   pathname: string;
@@ -31,7 +33,7 @@ export function isHomePathname(pathname: string) {
 }
 
 export function isStudioPathname(pathname: string) {
-  return pathname === STUDIO_PATH || pathname === STUDIO_PROFILE_PATH || pathname === STUDIO_ADMIN_PATH || pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH || pathname === STUDIO_BILLING_PATH || pathname === STUDIO_PROJECTS_PATH || pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`);
+  return pathname === STUDIO_PATH || pathname === STUDIO_PROFILE_PATH || pathname === STUDIO_NOTIFICATIONS_PATH || pathname === STUDIO_ADMIN_PATH || pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH || pathname === STUDIO_BILLING_PATH || pathname === STUDIO_PROJECTS_PATH || pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`);
 }
 
 export function clampHomePage(page: number) {
@@ -39,13 +41,11 @@ export function clampHomePage(page: number) {
 }
 
 export function getHomePageFromHash(hash: string) {
-  if (hash === "#pricing") return 2;
   if (hash === "#steps") return 1;
   return 0;
 }
 
 export function getHomePathForPage(page: number) {
-  if (page === 2) return "/#pricing";
   if (page === 1) return "/#steps";
   return "/";
 }

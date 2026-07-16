@@ -14,10 +14,12 @@ import {
   getInitialPage,
   isHomePathname,
   isStudioPathname,
+  PRICING_PATH,
   STUDIO_ADMIN_PATH,
   STUDIO_BILLING_PATH,
   STUDIO_DOMAIN_PURCHASE_PATH,
   STUDIO_DOMAINS_PATH,
+  STUDIO_NOTIFICATIONS_PATH,
   STUDIO_PATH,
   STUDIO_PROJECTS_PATH,
   STUDIO_PROFILE_PATH
@@ -33,10 +35,11 @@ import { ProjectsPage } from "@/pages/ProjectsPage";
 import { DomainsPage } from "@/pages/DomainsPage";
 import { DomainPurchasePage } from "@/pages/DomainPurchasePage";
 import { BillingPage } from "@/pages/BillingPage";
+import { NotificationsPage } from "@/pages/NotificationsPage";
+import { PricingPage } from "@/pages/PricingPage";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { ToastProvider } from "@/app/toast";
-import { NotificationCenter } from "@/app/NotificationCenter";
 
 const SIDEBAR_ACCOUNT_CACHE_KEY = "kuaipage:sidebar-account";
 
@@ -69,7 +72,7 @@ export function App() {
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
-  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
+  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
   const matchingCachedAccount = session && cachedSidebarAccount?.id === session.user.id ? cachedSidebarAccount : null;
   const silentGateAccount = account ?? matchingCachedAccount ?? (session ? {
     id: session.user.id,
@@ -77,6 +80,7 @@ export function App() {
     emailConfirmed: isSessionEmailConfirmed(session),
     role: "user" as const,
     plan: "free",
+    subscriptionExpiresAt: null,
     createdAt: session.user.created_at ?? new Date().toISOString(),
     usage: { sites: 0, publicSites: 0, storageBytes: 0, deploymentsToday: 0 }
   } : null);
@@ -257,6 +261,7 @@ export function App() {
           emailConfirmed: isSessionEmailConfirmed(session),
           role: "user",
           plan: "free",
+          subscriptionExpiresAt: null,
           createdAt: session.user.created_at ?? new Date().toISOString(),
           usage: { sites: 0, publicSites: 0, storageBytes: 0, deploymentsToday: 0 }
         });
@@ -336,6 +341,8 @@ export function App() {
         session={session}
       />
     );
+  } else if (pathname === PRICING_PATH) {
+    routeContent = <PricingPage onNavigate={navigate} session={session} />;
   } else if (pathname === "/auth") {
     routeContent = <AuthPage initialMode={authMode} onAuthenticated={setSession} onNavigate={navigate} status={authStatus} />;
   } else if (isProtectedRoute && authReady && !session) {
@@ -348,6 +355,8 @@ export function App() {
     routeContent = <BillingPage account={account} onNavigate={navigate} />;
   } else if (pathname === STUDIO_DOMAINS_PATH) {
     routeContent = <DomainsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
+  } else if (pathname === STUDIO_NOTIFICATIONS_PATH) {
+    routeContent = <NotificationsPage account={account} onNavigate={navigate} />;
   } else if (pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`)) {
     const siteId = decodeURIComponent(pathname.slice(STUDIO_PROJECTS_PATH.length + 1));
     routeContent = <ProjectDetailPage account={account} authReady={authReady} onNavigate={navigate} session={session} siteId={siteId} />;
@@ -384,7 +393,6 @@ export function App() {
           authReady={authReady}
           compact={page !== 0 || !isHomeRoute}
           isAuthenticated={Boolean(session && isSessionEmailConfirmed(session))}
-          notificationCenter={<NotificationCenter enabled={Boolean(session && isSessionEmailConfirmed(session))} />}
           onNavigate={navigate}
         />
         {displayedRouteContent}

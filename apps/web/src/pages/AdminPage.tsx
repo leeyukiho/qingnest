@@ -433,6 +433,7 @@ const compactNumber = (value: number) =>
     notation: value >= 10_000 ? "compact" : "standard",
   }).format(value);
 const formatCapacityValue = (key: CapacityMetricKey, value: number) => (key === "r2StorageBytes" ? `${(value / 1024 / 1024 / 1024).toFixed(2)} GB` : compactNumber(value));
+const providerMetricKeys = new Set<CapacityMetricKey>(["workerRequests", "kvReads", "kvWrites", "r2StorageBytes", "r2ClassA", "r2ClassB"]);
 
 function CapacityPanel() {
   const [data, setData] = useState<CapacityDashboard | null>(null);
@@ -535,6 +536,7 @@ function CapacityPanel() {
         </div>
       </div>
       <ToastMessage message={error} />
+      {!data.providerSample.available ? <ToastMessage message={`Cloudflare 用量采样暂不可用：${data.providerSample.error ?? "尚未完成首次采样"}`} /> : null}
       <div className="grid gap-4 border-b border-white/15 py-5 md:grid-cols-3">
         <label className="grid gap-1 text-xs text-zinc-500">
           Resend 套餐
@@ -598,7 +600,7 @@ function CapacityPanel() {
                     <span className="text-zinc-200">{capacityMetricMeta[key].label}</span>
                     <span className="block text-xs text-zinc-600">
                       {capacityMetricMeta[key].unit}
-                      {capacityMetricMeta[key].measured ? " · 平台记录" : " · 待接账单采样"}
+                      {providerMetricKeys.has(key) ? (data.providerSample.available ? " · Cloudflare 聚合" : " · 采样不可用") : " · 平台记录"}
                     </span>
                   </Cell>
                   <Cell>{formatCapacityValue(key, used)}</Cell>
@@ -887,7 +889,17 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
     ["max_storage_bytes", "存储空间（MB）", (v) => String(Math.round(v / 1024 / 1024)), (v) => Number(v) * 1024 * 1024],
     ["max_deployments_per_day", "每日部署", String, Number],
     ["max_upload_sessions_per_hour", "每小时上传", String, Number],
+    ["max_site_bytes", "单站点大小（MB）", (v) => String(Math.round(v / 1024 / 1024)), (v) => Number(v) * 1024 * 1024],
+    ["max_domains_per_site", "每项目域名数", String, Number],
     ["max_files", "单次部署文件数", String, Number],
+  ];
+  const capabilities: Array<[keyof AdminPlan, string]> = [
+    ["custom_domain", "自定义域名"],
+    ["password_protection", "访问密码保护"],
+    ["access_analytics", "访问数据分析"],
+    ["remove_branding", "移除平台标识"],
+    ["rollback", "历史版本回滚"],
+    ["source_build", "源码构建发布"],
   ];
   const [values, setValues] = useState(() => Object.fromEntries(plans.flatMap((plan) => quotas.map(([key, , format]) => [`${plan.key}.${key}`, format(plan[key] as number)]))));
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -908,13 +920,12 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
         updateAdminPlan(plan.key, {
           ...draft,
           ...numeric,
-          custom_domain: false,
         }),
     });
   }
   return (
     <section className="mt-5">
-      <SectionHeading title="等级权益" description="这里只分配服务端实际执行的资源配额，保存后会同步影响用户展示和请求校验。" />
+      <SectionHeading title="等级权益" description="资源配额会同步影响用户展示和服务端校验；功能能力会展示在用户套餐中，仍需由对应功能接入鉴权后才会限制使用。" />
       <div className="mt-4 overflow-x-auto border-y border-white/15">
         <table className="w-full min-w-[760px] text-sm">
           <thead>
@@ -948,6 +959,38 @@ function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan
                         value={values[id]}
                       />
                       <FieldError message={errors[id]} />
+                    </Cell>
+                  );
+                })}
+              </tr>
+            ))}
+            <tr className="border-y border-white/15 bg-white/[0.025]">
+              <td className="px-3 py-3 text-xs font-semibold uppercase text-zinc-500" colSpan={plans.length + 1}>Cloudflare 统一规则</td>
+            </tr>
+            <tr className="border-b border-white/10">
+              <Cell>流量与带宽</Cell>
+              {plans.map((plan) => <Cell key={plan.key}><span className="text-zinc-300">不限量</span></Cell>)}
+            </tr>
+            <tr className="border-y border-white/15 bg-white/[0.025]">
+              <td className="px-3 py-3 text-xs font-semibold uppercase text-zinc-500" colSpan={plans.length + 1}>功能能力</td>
+            </tr>
+            {capabilities.map(([key, label]) => (
+              <tr className="border-b border-white/10" key={key}>
+                <Cell>{label}</Cell>
+                {plans.map((plan) => {
+                  const draft = drafts[plan.key] ?? plan;
+                  return (
+                    <Cell key={plan.key}>
+                      <Toggle
+                        checked={Boolean(draft[key])}
+                        label={draft[key] ? "已包含" : "未包含"}
+                        onChange={(checked) =>
+                          setDrafts((all) => ({
+                            ...all,
+                            [plan.key]: { ...draft, [key]: checked },
+                          }))
+                        }
+                      />
                     </Cell>
                   );
                 })}
