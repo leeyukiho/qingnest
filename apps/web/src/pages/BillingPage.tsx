@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, CreditCard, FileText, Loader2, ReceiptText } from "lucide-react";
+import { ArrowRight, CreditCard, FileText, Loader2, ReceiptText, X } from "lucide-react";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { formatBytes } from "@/app/deployment-view";
@@ -12,7 +12,7 @@ import {
   STUDIO_SECTION_CLASS,
   STUDIO_TITLE_CLASS,
 } from "@/app/ui";
-import { getOrders, type AccountProfile, type PaymentOrder } from "@/lib/api";
+import { cancelOrder, getOrders, type AccountProfile, type PaymentOrder } from "@/lib/api";
 
 const orderStatus: Record<PaymentOrder["status"], string> = {
   pending: "等待支付", payment_failed: "创建支付失败", paid: "已到账", fulfilling: "正在开通",
@@ -37,11 +37,25 @@ export function BillingPage({
   const [orders, setOrders] = useState<PaymentOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
     getOrders().then((data) => { if (active) setOrders(data); }).catch((cause) => { if (active) setOrdersError(cause instanceof Error ? cause.message : "订单加载失败"); }).finally(() => { if (active) setOrdersLoading(false); });
     return () => { active = false; };
   }, []);
+  const handleCancelOrder = async (orderId: string) => {
+    if (cancellingOrderId) return;
+    setCancellingOrderId(orderId);
+    setOrdersError("");
+    try {
+      const cancelled = await cancelOrder(orderId);
+      setOrders((current) => current.map((order) => order.id === orderId ? cancelled : order));
+    } catch (cause) {
+      setOrdersError(cause instanceof Error ? cause.message : "取消订单失败");
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
   const quotaItems: Array<{ label: string; current: number; limit: number; unit?: string; formatted?: boolean }> = [
     { label: "项目", current: usage?.sites ?? 0, limit: plan.quotas.user.maxSites, unit: "个" },
     { label: "公开站点", current: usage?.publicSites ?? 0, limit: plan.quotas.user.maxPublicSites, unit: "个" },
@@ -117,7 +131,7 @@ export function BillingPage({
               </div>
               {ordersLoading ? <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />正在读取订单</div> : null}
               {ordersError ? <p className="py-8 text-sm text-red-300">{ordersError}</p> : null}
-              {!ordersLoading && !ordersError && orders.length ? <div className="divide-y divide-white/10">{orders.map((order) => <article className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_8rem_9rem] sm:items-center" key={order.id}><div><p className="text-sm font-medium text-zinc-200">{order.productName}</p><p className="mt-1 text-xs text-zinc-600">{order.orderNo} · {new Date(order.createdAt).toLocaleString("zh-CN")}</p>{order.failureMessage ? <p className="mt-1 text-xs text-amber-300">{order.failureMessage}</p> : null}</div><div className="text-sm tabular-nums text-zinc-300">¥{(order.amountCents / 100).toFixed(2)}{order.actualAmountCents !== null && order.actualAmountCents !== order.amountCents ? <span className="block text-xs text-zinc-600">实付 ¥{(order.actualAmountCents / 100).toFixed(2)}</span> : null}</div><span className="text-sm text-zinc-400 sm:text-right">{orderStatus[order.status]}</span></article>)}</div> : null}
+              {!ordersLoading && orders.length ? <div className="divide-y divide-white/10">{orders.map((order) => <article className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_8rem_10rem] sm:items-center" key={order.id}><div><p className="text-sm font-medium text-zinc-200">{order.productName}</p><p className="mt-1 text-xs text-zinc-600">{order.orderNo} · {new Date(order.createdAt).toLocaleString("zh-CN")}</p>{order.status === "pending" ? <p className="mt-1 text-xs text-zinc-500">请在 {new Date(order.expiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 前支付</p> : null}{order.failureMessage ? <p className="mt-1 text-xs text-amber-300">{order.failureMessage}</p> : null}</div><div className="text-sm tabular-nums text-zinc-300">¥{(order.amountCents / 100).toFixed(2)}{order.actualAmountCents !== null && order.actualAmountCents !== order.amountCents ? <span className="block text-xs text-zinc-600">实付 ¥{(order.actualAmountCents / 100).toFixed(2)}</span> : null}</div><div className="flex items-center justify-end gap-3"><span className="text-sm text-zinc-400">{orderStatus[order.status]}</span>{order.status === "pending" || order.status === "payment_failed" ? <button aria-label="取消订单" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-white disabled:opacity-40" disabled={cancellingOrderId !== null} onClick={() => void handleCancelOrder(order.id)} title="取消订单" type="button">{cancellingOrderId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}</button> : null}</div></article>)}</div> : null}
               {!ordersLoading && !ordersError && !orders.length ? <div className="flex min-h-56 flex-col items-center justify-center px-4 text-center">
                 <span className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/[0.03]"><FileText className="h-5 w-5 text-zinc-500" aria-hidden="true" /></span>
                 <p className="mt-4 text-sm font-medium text-zinc-300">暂无订单</p>

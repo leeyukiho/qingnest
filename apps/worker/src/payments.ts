@@ -103,6 +103,14 @@ function checkoutExpiry() {
   return new Date(Date.now() + 10 * 60_000).toISOString();
 }
 
+async function expirePendingOrders(env: Env) {
+  const now = new Date().toISOString();
+  const { error } = await createServiceSupabase(env).from("orders")
+    .update({ status: "expired", updated_at: now })
+    .eq("status", "pending").lt("expires_at", now);
+  if (error) throw new Error(error.message);
+}
+
 async function createFmPayment(env: Env, order: OrderRow) {
   const config = fmConfig(env);
   const amount = fmAmountFromCents(order.amount_cents);
@@ -306,6 +314,7 @@ function orderView(row: OrderRow, actualAmountCents: number | null): OrderView {
 }
 
 export async function listUserOrders(env: Env, user: AuthenticatedUser) {
+  await expirePendingOrders(env);
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase.from("orders").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100);
   if (error) throw new Error(error.message);
@@ -317,6 +326,7 @@ export async function listUserOrders(env: Env, user: AuthenticatedUser) {
 }
 
 export async function getUserOrder(env: Env, user: AuthenticatedUser, id: string) {
+  await expirePendingOrders(env);
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase.from("orders").select("*").eq("id", id).eq("user_id", user.id).single();
   if (error) throw new Error(error.message);
@@ -325,11 +335,22 @@ export async function getUserOrder(env: Env, user: AuthenticatedUser, id: string
 }
 
 export async function getUserOrderByNumber(env: Env, user: AuthenticatedUser, orderNo: string) {
+  await expirePendingOrders(env);
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase.from("orders").select("*").eq("order_no", orderNo).eq("user_id", user.id).single();
   if (error) throw new Error(error.message);
   const { data: payment } = await supabase.from("payments").select("actual_amount_cents").eq("order_id", data.id).eq("status", "success").maybeSingle();
   return orderView(data, payment?.actual_amount_cents ?? null);
+}
+
+export async function cancelUserOrder(env: Env, user: AuthenticatedUser, orderId: string) {
+  await expirePendingOrders(env);
+  const { data, error } = await createServiceSupabase(env).rpc("cancel_payment_order", {
+    p_user_id: user.id,
+    p_order_id: orderId,
+  });
+  if (error) throw new Error(error.message);
+  return orderView(rpcRow(data) as OrderRow, null);
 }
 
 async function queryFmOrder(env: Env, order: OrderRow) {
@@ -409,7 +430,7 @@ export async function runPaymentLifecycle(env: Env) {
   if (!hasServiceSupabase(env)) return;
   const supabase = createServiceSupabase(env);
   const now = new Date().toISOString();
-  await supabase.from("orders").update({ status: "expired", updated_at: now }).eq("status", "pending").lt("expires_at", now);
+  await expirePendingOrders(env);
   await supabase.from("domain_reservations").update({ status: "released", updated_at: now }).eq("status", "active").lt("expires_at", now);
   await supabase.from("profiles").update({ plan: "free", plan_expires_at: null }).not("plan_expires_at", "is", null).lte("plan_expires_at", now);
   const { data: jobs } = await supabase.from("fulfillment_jobs").select("order_id").eq("status", "failed").lte("next_attempt_at", now).limit(20);

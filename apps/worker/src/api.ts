@@ -48,6 +48,7 @@ import { hasServiceSupabase } from "./supabase";
 import type { Env } from "./types";
 import { getCapacityDashboard, updateCapacitySettings } from "./capacity";
 import {
+  cancelUserOrder,
   createDomainCheckout,
   createDomainRenewalCheckout,
   createPlanCheckout,
@@ -232,6 +233,11 @@ export async function handleApi(request: Request, env: Env) {
     }
 
     const orderMatch = url.pathname.match(/^\/api\/orders\/([^/]+)$/);
+    if (request.method === "DELETE" && orderMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await cancelUserOrder(env, user, decodeURIComponent(orderMatch[1] ?? "")));
+    }
     if (request.method === "GET" && orderMatch) {
       const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
       if (!user) return problem("请先登录", 401);

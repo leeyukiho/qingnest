@@ -475,6 +475,7 @@ export const createDomainPayment = (hostname: string, hostnameSuffix: string, du
 export const createDomainRenewalPayment = (domainId: string, durationMonths: 1 | 3 | 6 | 12) => request<CheckoutResult>("/api/orders/domain-renewal", { method: "POST", body: JSON.stringify({ domainId, durationMonths }) });
 export const getOrders = () => request<PaymentOrder[]>("/api/orders");
 export const getOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`);
+export const cancelOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const getOrderByNumber = (orderNo: string) => request<PaymentOrder>(`/api/orders?orderNo=${encodeURIComponent(orderNo)}`);
 export const getDomainRenewalEligibility = (domainId: string) => request<{ eligible: boolean; reason: string | null; allowedDurations: Array<1 | 3 | 6 | 12>; renewalWindowDays?: number; maxAdvanceMonths?: number }>(`/api/domains/${encodeURIComponent(domainId)}/renewal-eligibility`);
 

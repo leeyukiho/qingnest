@@ -290,6 +290,10 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      cancel_payment_order: {
+        Args: { p_user_id: string; p_order_id: string };
+        Returns: Database["public"]["Tables"]["orders"]["Row"];
+      };
       get_admin_overview: {
         Args: { p_admin_id: string };
         Returns: Json;
