@@ -5,7 +5,9 @@ export const STUDIO_PROJECTS_PATH = `${STUDIO_PATH}/projects`;
 export const STUDIO_DOMAINS_PATH = `${STUDIO_PATH}/domains`;
 export const STUDIO_DOMAIN_PURCHASE_PATH = `${STUDIO_DOMAINS_PATH}/purchase`;
 export const STUDIO_MY_DOMAINS_PATH = `${STUDIO_DOMAINS_PATH}/manage`;
+export const STUDIO_WALLET_PATH = `${STUDIO_PATH}/wallet`;
 export const STUDIO_BILLING_PATH = `${STUDIO_PATH}/billing`;
+export const STUDIO_ORDERS_PATH = `${STUDIO_PATH}/orders`;
 export const STUDIO_PAYMENT_RESULT_PATH = `${STUDIO_BILLING_PATH}/payment-result`;
 export const STUDIO_PROFILE_PATH = `${STUDIO_PATH}/profile`;
 export const STUDIO_NOTIFICATIONS_PATH = `${STUDIO_PATH}/notifications`;
@@ -35,7 +37,7 @@ export function isHomePathname(pathname: string) {
 }
 
 export function isStudioPathname(pathname: string) {
-  return pathname === STUDIO_PATH || pathname === STUDIO_PROFILE_PATH || pathname === STUDIO_NOTIFICATIONS_PATH || pathname === STUDIO_ADMIN_PATH || pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH || pathname === STUDIO_MY_DOMAINS_PATH || pathname === STUDIO_BILLING_PATH || pathname === STUDIO_PAYMENT_RESULT_PATH || pathname === STUDIO_PROJECTS_PATH || pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`);
+  return pathname === STUDIO_PATH || pathname === STUDIO_PROFILE_PATH || pathname === STUDIO_NOTIFICATIONS_PATH || pathname === STUDIO_ADMIN_PATH || pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH || pathname === STUDIO_MY_DOMAINS_PATH || pathname === STUDIO_WALLET_PATH || pathname === STUDIO_BILLING_PATH || pathname === STUDIO_ORDERS_PATH || pathname === STUDIO_PAYMENT_RESULT_PATH || pathname === STUDIO_PROJECTS_PATH || pathname.startsWith(`${STUDIO_PROJECTS_PATH}/`);
 }
 
 export function clampHomePage(page: number) {

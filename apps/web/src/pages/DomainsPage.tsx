@@ -161,11 +161,11 @@ export function DomainsPage({
     if (!renewingSlot) return;
     setRenewalBusy(renewingSlot.id);
     try {
-      const checkout = await createDomainRenewalPayment(renewingSlot.id, renewalDuration);
-      sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo);
-      window.location.assign(checkout.payUrl);
+      await createDomainRenewalPayment(renewingSlot.id, renewalDuration);
+      setSlots(await listPublicSlots());
+      setRenewingSlot(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "支付宝续费订单创建失败");
+      setError(cause instanceof Error ? cause.message : "余额续费失败");
       setRenewalBusy(null);
       setRenewingSlot(null);
     }
@@ -250,8 +250,13 @@ export function DomainsPage({
                             : "平台域名"}
                         </p>
                         <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-zinc-600">
-                          <span>有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</span>
-                          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-zinc-500">{formatRemainingTime(slot.expiresAt)}</span>
+                          {slot.graceExpiresAt ? (
+                            <span>保留至 {new Date(slot.graceExpiresAt).toLocaleString("zh-CN")}</span>
+                          ) : slot.entitlementSource === "plan_grant" ? (
+                            <span>套餐赠送 · 长期有效</span>
+                          ) : (
+                            <><span>有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</span><span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-zinc-500">{formatRemainingTime(slot.expiresAt)}</span></>
+                          )}
                         </p>
                       </div>
                       <div className="grid min-w-0 grid-rows-[1rem_2.25rem] gap-1">
@@ -315,7 +320,7 @@ export function DomainsPage({
                         )}
                       </div>
                       <div className="flex flex-wrap gap-2 md:justify-end">
-                        {slot.type === "platform_subdomain" ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void beginRenewal(slot)} type="button">{renewalBusy === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}续费</button> : null}
+                        {slot.type === "platform_subdomain" && slot.entitlementSource === "paid_rental" ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void beginRenewal(slot)} type="button">{renewalBusy === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}续费</button> : null}
                         <a
                           className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5"
                           href={slot.publicUrl}
@@ -342,7 +347,7 @@ export function DomainsPage({
                 </div>
               </div>
             )}
-            {renewingSlot ? <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-md border border-white/20 bg-black p-5"><h2 className="text-base font-semibold text-white">续费平台域名</h2><p className="mt-2 break-all text-sm text-zinc-400">{displayHostname(renewingSlot.hostname)}</p><p className="mt-3 text-sm leading-6 text-zinc-500">只可在后台设置的到期窗口内续费，并受最长提前持有期限限制。确认后进入支付宝。</p><div className="mt-5 grid grid-cols-4 gap-2">{renewalDurations.map((months) => <button aria-pressed={renewalDuration === months} className={`h-10 rounded-md border text-sm ${renewalDuration === months ? "border-white bg-white text-black" : "border-white/15 text-zinc-300"}`} key={months} onClick={() => setRenewalDuration(months)} type="button">{months} 个月</button>)}</div><div className="mt-6 flex justify-end gap-2"><button className="h-9 rounded-md border border-white/15 px-3 text-sm text-zinc-300" disabled={renewalBusy !== null} onClick={() => setRenewingSlot(null)} type="button">取消</button><button className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void payRenewal()} type="button">{renewalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}支付宝续费</button></div></div></div> : null}
+            {renewingSlot ? <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-md border border-white/20 bg-black p-5"><h2 className="text-base font-semibold text-white">续费平台域名</h2><p className="mt-2 break-all text-sm text-zinc-400">{displayHostname(renewingSlot.hostname)}</p><p className="mt-3 text-sm leading-6 text-zinc-500">只可在后台设置的到期窗口内续费，并受最长提前持有期限限制。确认后从账户余额扣款。</p><div className="mt-5 grid grid-cols-4 gap-2">{renewalDurations.map((months) => <button aria-pressed={renewalDuration === months} className={`h-10 rounded-md border text-sm ${renewalDuration === months ? "border-white bg-white text-black" : "border-white/15 text-zinc-300"}`} key={months} onClick={() => setRenewalDuration(months)} type="button">{months} 个月</button>)}</div><div className="mt-6 flex justify-end gap-2"><button className="h-9 rounded-md border border-white/15 px-3 text-sm text-zinc-300" disabled={renewalBusy !== null} onClick={() => setRenewingSlot(null)} type="button">取消</button><button className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void payRenewal()} type="button">{renewalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}余额续费</button></div></div></div> : null}
             {editingSlot && !pendingBinding ? (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"

@@ -71,16 +71,20 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const availableProductTabs = productTabs.filter((tab) => tab.available);
   const startPath = session ? STUDIO_BILLING_PATH : "/auth?mode=sign_up";
 
-  const choosePlan = async (plan: PublicPlan) => {
+  const choosePlan = async (plan: PublicPlan, paymentMethod: "wallet" | "alipay") => {
     if (!session || plan.renewal_price_cents === 0) { onNavigate(startPath); return; }
     setPayingPlan(plan.key);
     setError("");
     try {
-      const checkout = await createPlanPayment(plan.key, 1);
-      sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo);
-      window.location.assign(checkout.payUrl);
+      const result = await createPlanPayment(plan.key, 1, paymentMethod);
+      if ("payUrl" in result) {
+        sessionStorage.setItem("kuaipage:pending-order-no", result.orderNo);
+        window.location.assign(result.payUrl);
+      } else {
+        onNavigate(STUDIO_BILLING_PATH);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "支付宝订单创建失败");
+      setError(cause instanceof Error ? cause.message : "套餐购买失败");
       setPayingPlan(null);
     }
   };
@@ -138,9 +142,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
                   </div>
                   <h2 className="mt-3 text-xl font-semibold tracking-normal text-white">{plan.label}</h2>
                   <PlanPrice plan={plan} />
-                  <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 bg-black px-4 text-sm font-semibold text-white transition-colors hover:border-white hover:bg-white hover:text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-wait disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(plan)} type="button">
-                    {payingPlan === plan.key ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}{plan.renewal_price_cents === 0 ? "免费开始" : "支付宝购买"}{payingPlan !== plan.key ? <ArrowRight className="h-4 w-4" aria-hidden="true" /> : null}
-                  </button>
+                  {plan.renewal_price_cents === 0 ? <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 px-4 text-sm font-semibold" disabled={payingPlan !== null} onClick={() => onNavigate(startPath)} type="button">免费开始<ArrowRight className="h-4 w-4" /></button> : <div className="mt-5 grid grid-cols-2 gap-2"><button className="h-10 rounded-md bg-white px-3 text-sm font-semibold text-black disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(plan, "wallet")} type="button">{payingPlan === plan.key ? <LoaderCircle className="mx-auto h-4 w-4 animate-spin" /> : "余额购买"}</button><button className="h-10 rounded-md border border-white/25 px-3 text-sm font-semibold text-white disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(plan, "alipay")} type="button">支付宝购买</button></div>}
                   <div className="mt-7 border-t border-white/10 pt-5">
                     <p className="text-xs font-medium text-zinc-500">包含权益</p>
                   </div>

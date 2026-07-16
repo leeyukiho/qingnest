@@ -145,6 +145,7 @@
         "user": {
           "maxSites": 2,
           "maxPublicSites": 1,
+          "maxFreeDomains": 1,
           "maxStorageBytes": 104857600,
           "maxDeploymentsPerDay": 5,
           "maxUploadSessionsPerHour": 5
@@ -188,6 +189,7 @@
         "user": {
           "maxSites": 5,
           "maxPublicSites": 3,
+          "maxFreeDomains": 1,
           "maxStorageBytes": 524288000,
           "maxDeploymentsPerDay": 20,
           "maxUploadSessionsPerHour": 20
@@ -231,6 +233,7 @@
         "user": {
           "maxSites": 20,
           "maxPublicSites": 10,
+          "maxFreeDomains": 3,
           "maxStorageBytes": 5368709120,
           "maxDeploymentsPerDay": 100,
           "maxUploadSessionsPerHour": 100
@@ -274,6 +277,7 @@
         "user": {
           "maxSites": 50,
           "maxPublicSites": 30,
+          "maxFreeDomains": 10,
           "maxStorageBytes": 21474836480,
           "maxDeploymentsPerDay": 300,
           "maxUploadSessionsPerHour": 200

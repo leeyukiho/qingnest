@@ -926,6 +926,7 @@ function PlansPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan[];
 
 function BenefitsPanel({ plans, drafts, setDrafts, confirm }: { plans: AdminPlan[]; drafts: Record<string, AdminPlan>; setDrafts: React.Dispatch<React.SetStateAction<Record<string, AdminPlan>>>; confirm: (action: PendingAction) => void }) {
   const quotas: Array<[keyof AdminPlan, string, (value: number) => string, (value: string) => number]> = [
+    ["max_free_domains" as keyof AdminPlan, "免费平台域名", String, Number],
     ["max_sites", "项目数", String, Number],
     ["max_public_sites", "公开项目", String, Number],
     ["max_storage_bytes", "存储空间（MB）", (v) => String(Math.round(v / 1024 / 1024)), (v) => Number(v) * 1024 * 1024],
@@ -1245,6 +1246,17 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                           setPriceDrafts((all) => ({
                             ...all,
                             [draft.domain_type]: { ...draft, enabled: checked },
+                          }))
+                        }
+                      />
+                      <Toggle
+                        checked={draft.free_claim_enabled}
+                        disabled={draft.setup_status !== "active" || !draft.enabled}
+                        label={draft.free_claim_enabled ? "允许套餐免费领取" : "仅支持付费租赁"}
+                        onChange={(checked) =>
+                          setPriceDrafts((all) => ({
+                            ...all,
+                            [draft.domain_type]: { ...draft, free_claim_enabled: checked },
                           }))
                         }
                       />

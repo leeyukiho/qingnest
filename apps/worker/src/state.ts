@@ -85,6 +85,8 @@ export type PublicSlot = {
   type: "platform_subdomain" | "custom_domain";
   status: "active" | "pending_review" | "blocked";
   expiresAt: string;
+  entitlementSource: "plan_grant" | "paid_rental";
+  graceExpiresAt: string | null;
 };
 
 type MemoryUploadSession = {
@@ -118,6 +120,7 @@ export type AccountProfile = {
   role: ProfileRole;
   plan: string;
   subscriptionExpiresAt: string | null;
+  walletBalanceCents: number;
   planConfig: ReturnType<typeof getPlanConfig>;
   createdAt: string;
   usage: {
@@ -301,7 +304,7 @@ async function writeDomainCache(
   }
 }
 
-async function deleteDomainCache(env: Env, hostname: string) {
+export async function deleteDomainCache(env: Env, hostname: string) {
   const normalized = hostname.toLowerCase();
   invalidateMemoryDomainMapping(normalized);
   if (!env.DOMAIN_MAP) return false;
@@ -1023,6 +1026,7 @@ export async function getAccountProfile(
       .map((domain) => domain.site_id)
       .filter((siteId): siteId is string => Boolean(siteId)),
   ).size;
+  const { data: wallet } = await supabase.from("wallet_accounts").select("balance_cents").eq("user_id", user.id).maybeSingle();
 
   return {
     id: user.id,
@@ -1031,6 +1035,7 @@ export async function getAccountProfile(
     role: data.role,
     plan: data.plan,
     subscriptionExpiresAt: data.plan_expires_at,
+    walletBalanceCents: Number(wallet?.balance_cents ?? 0),
     planConfig: await getEffectivePlanConfig(env, data.plan),
     createdAt: data.created_at,
     usage: {
@@ -1150,7 +1155,7 @@ async function getEffectivePlanConfig(env: Env, planKey: string | null | undefin
     enabled: data.enabled,
     quotas: {
       ...fallback.quotas,
-      user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day, maxUploadSessionsPerHour: data.max_upload_sessions_per_hour },
+      user: { ...fallback.quotas.user, maxSites: data.max_sites, maxPublicSites: data.max_public_sites, maxFreeDomains: data.max_free_domains, maxStorageBytes: Number(data.max_storage_bytes), maxDeploymentsPerDay: data.max_deployments_per_day, maxUploadSessionsPerHour: data.max_upload_sessions_per_hour },
       site: { ...fallback.quotas.site, maxSiteBytes: Number(data.max_site_bytes), maxDomainsPerSite: data.max_domains_per_site },
       deployment: { ...fallback.quotas.deployment, maxFiles: data.max_files },
     },
@@ -1257,6 +1262,10 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
     throw new Error("已接入 Cloudflare 的域名后缀不能直接修改，请新增域名后再下架旧域名");
   }
   if (update.enabled && current.setup_status !== "active") throw new Error("Cloudflare 接入完成前不能上架该域名");
+  const requestedFreeClaim = update.enabled === false ? false : update.free_claim_enabled;
+  if (requestedFreeClaim && current.setup_status !== "active") {
+    throw new Error("域名完成 Cloudflare 接入并上架后才能开放免费领取");
+  }
   const safeUpdate = {
     label: update.label,
     hostname_suffix: requestedSuffix,
@@ -1269,6 +1278,7 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
     renewal_window_days: update.renewal_window_days,
     max_advance_months: update.max_advance_months,
     enabled: update.enabled,
+    free_claim_enabled: requestedFreeClaim,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabase.from("domain_pricing").update(safeUpdate).eq("domain_type", type).select("*").single();
@@ -1285,7 +1295,7 @@ export async function createAdminDomainPrice(env: Env, user: AuthenticatedUser, 
   const key = platformDomainType(suffix);
   const normalizedLabel = normalizeHostname(input.label);
   const label = normalizedLabel.ok && normalizedLabel.ascii === suffix ? normalizedLabel.display : normalized.display;
-  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, label, hostname_suffix: suffix, enabled: false, setup_status: "pending_zone", next_check_at: new Date().toISOString() }).select("*").single();
+  const { data, error } = await supabase.from("domain_pricing").insert({ ...input, domain_type: key, label, hostname_suffix: suffix, enabled: false, free_claim_enabled: false, setup_status: "pending_zone", next_check_at: new Date().toISOString() }).select("*").single();
   if (error) throw new Error(error.code === "23505" ? "该平台域名已存在" : error.message);
   await supabase.from("audit_events").insert({ user_id: user.id, event_type: "admin.domain_pricing.created", message: `管理员新增平台域名 ${suffix}` });
   try {
@@ -1687,7 +1697,7 @@ export async function listPublicSlots(
   const supabase = createServiceSupabase(env);
   const { data, error } = await supabase
     .from("domains")
-    .select("id, site_id, hostname, type, status, expires_at")
+    .select("id, site_id, hostname, type, status, expires_at, entitlement_source, grace_expires_at")
     .eq("user_id", user.id)
     .neq("status", "deleted")
     .order("created_at", { ascending: true });
@@ -1699,6 +1709,8 @@ export async function listPublicSlots(
     publicUrl: getPublicUrlFromHostname(env, domain.hostname),
     type: domain.type,
     expiresAt: domain.expires_at,
+    entitlementSource: domain.entitlement_source,
+    graceExpiresAt: domain.grace_expires_at,
     status:
       domain.status === "blocked"
         ? "blocked"
@@ -1759,43 +1771,55 @@ export async function createPublicSlot(
   const availability = await checkSubdomainAvailability(env, input.subdomain);
   if (!availability.available)
     throw new Error(availability.reason ?? "公开地址不可用");
-  const plan = await getEffectivePlanConfig(env, await getUserPlan(env, input.user));
-  const supabase = createServiceSupabase(env);
-  const { count, error: countError } = await supabase
-    .from("domains")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", input.user.id)
-    .neq("status", "deleted");
-  if (countError) throw new Error(countError.message);
-  if ((count ?? 0) >= plan.quotas.user.maxPublicSites)
-    throw new Error(
-      `当前套餐最多同时公开 ${plan.quotas.user.maxPublicSites} 个项目`,
-    );
   const { deployment } = await getOwnedPublishableSite(
     env,
     input.user,
     input.siteId,
   );
-  const { data: domain, error } = await supabase
-    .from("domains")
-    .insert({
-      user_id: input.user.id,
-      site_id: input.siteId,
-      hostname:
-        availability.hostname ??
-        getDistributionHostname(env, availability.normalized),
-      type: "platform_subdomain",
-      status: availability.requiresReview ? "pending_review" : "active",
-      last_binding_change_at: new Date().toISOString(),
-    })
-    .select("id, site_id, hostname, type, status")
-    .single();
-  if (error || !domain) throw new Error(error?.message ?? "公开地址创建失败");
+  const domain = await claimFreeDomainRecord(env, {
+    user: input.user,
+    hostname: availability.hostname ?? getDistributionHostname(env, availability.normalized),
+    hostnameSuffix: getWorkerPlatformConfig(env).domains.distributionRoot,
+    siteId: input.siteId,
+    requiresReview: Boolean(availability.requiresReview),
+  });
   invalidateSubdomainAvailability(availability.normalized);
   await cachePublicSlot(env, domain, input.siteId, deployment);
   return (await listPublicSlots(env, input.user)).find(
     (slot) => slot.id === domain.id,
   )!;
+}
+
+async function claimFreeDomainRecord(
+  env: Env,
+  input: { user: AuthenticatedUser; hostname: string; hostnameSuffix: string; siteId: string | null; requiresReview: boolean },
+) {
+  const { data, error } = await createServiceSupabase(env).rpc("claim_free_platform_domain", {
+    p_user_id: input.user.id,
+    p_hostname: input.hostname,
+    p_hostname_suffix: input.hostnameSuffix,
+    p_status: input.requiresReview ? "pending_review" : "active",
+    p_site_id: input.siteId,
+  });
+  if (error || !data) throw new Error(error?.message ?? "免费域名领取失败");
+  return Array.isArray(data) ? data[0]! : data;
+}
+
+export async function claimFreePublicSlot(
+  env: Env,
+  input: { subdomain: string; hostnameSuffix: string; user: AuthenticatedUser },
+) {
+  const availability = await checkSubdomainAvailability(env, input.subdomain, input.hostnameSuffix);
+  if (!availability.available) throw new Error(availability.reason ?? "公开地址不可用");
+  const domain = await claimFreeDomainRecord(env, {
+    user: input.user,
+    hostname: availability.hostname ?? `${availability.normalized}.${input.hostnameSuffix}`,
+    hostnameSuffix: input.hostnameSuffix,
+    siteId: null,
+    requiresReview: Boolean(availability.requiresReview),
+  });
+  invalidateSubdomainAvailability(availability.normalized);
+  return (await listPublicSlots(env, input.user)).find((slot) => slot.id === domain.id)!;
 }
 
 export async function rentPublicSlot(
@@ -1820,6 +1844,7 @@ export async function rentPublicSlot(
         availability.hostname ??
         getDistributionHostname(env, availability.normalized),
       type: "platform_subdomain",
+      entitlement_source: "paid_rental",
       status: availability.requiresReview ? "pending_review" : "active",
       expires_at: expiresAt.toISOString(),
     })
@@ -1836,9 +1861,9 @@ export async function rentPublicSlot(
 
 export async function listPlatformDomainCatalog(env: Env) {
   const fallback = getWorkerPlatformConfig(env).domains.distributionRoot;
-  if (!hasServiceSupabase(env)) return [{ domain_type: "platform_subdomain", label: fallback, hostname_suffix: fallback, price_cents: 990, billing_period: "year", monthly_price_cents: 99, quarterly_price_cents: 279, semiannual_price_cents: 529, annual_price_cents: 990, enabled: true }];
+  if (!hasServiceSupabase(env)) return [{ domain_type: "platform_subdomain", label: fallback, hostname_suffix: fallback, price_cents: 990, billing_period: "year", monthly_price_cents: 99, quarterly_price_cents: 279, semiannual_price_cents: 529, annual_price_cents: 990, enabled: true, free_claim_enabled: true }];
   const supabase = createServiceSupabase(env);
-  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, monthly_price_cents, quarterly_price_cents, semiannual_price_cents, annual_price_cents, enabled").eq("enabled", true).eq("setup_status", "active").order("annual_price_cents");
+  const { data, error } = await supabase.from("domain_pricing").select("domain_type, label, hostname_suffix, price_cents, billing_period, monthly_price_cents, quarterly_price_cents, semiannual_price_cents, annual_price_cents, enabled, free_claim_enabled").eq("enabled", true).eq("setup_status", "active").order("annual_price_cents");
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -1850,12 +1875,13 @@ export async function switchPublicSlot(
   const supabase = createServiceSupabase(env);
   const { data: domain, error: domainError } = await supabase
     .from("domains")
-    .select("id, hostname, status, site_id, last_binding_change_at")
+    .select("id, hostname, status, site_id, last_binding_change_at, grace_expires_at")
     .eq("id", input.slotId)
     .eq("user_id", input.user.id)
     .neq("status", "deleted")
     .single();
   if (domainError || !domain) throw new Error("公开地址不存在或无权操作");
+  if (domain.grace_expires_at) throw new Error("该域名处于 12 小时保留期，请先续费套餐");
   if (domain.site_id === input.siteId)
     return (await listPublicSlots(env, input.user)).find(
       (slot) => slot.id === domain.id,

@@ -12,6 +12,7 @@ const planSchema = z.object({
     user: z.object({
       maxSites: z.number().int().positive(),
       maxPublicSites: z.number().int().positive(),
+      maxFreeDomains: z.number().int().nonnegative(),
       maxStorageBytes: z.number().int().positive(),
       maxDeploymentsPerDay: z.number().int().positive(),
       maxUploadSessionsPerHour: z.number().int().positive()

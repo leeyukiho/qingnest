@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, CreditCard, ExternalLink, FileText, Loader2, ReceiptText, X } from "lucide-react";
+import { ArrowRight, CreditCard, ExternalLink, FileText, Loader2, ReceiptText, WalletCards, X } from "lucide-react";
 import { getPlanConfig } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { formatBytes } from "@/app/deployment-view";
@@ -12,13 +12,15 @@ import {
   STUDIO_SECTION_CLASS,
   STUDIO_TITLE_CLASS,
 } from "@/app/ui";
-import { cancelOrder, getOrders, type AccountProfile, type PaymentOrder } from "@/lib/api";
+import { cancelOrder, createWalletTopup, getOrders, getWallet, type AccountProfile, type PaymentOrder, type WalletSummary } from "@/lib/api";
 
 const orderStatus: Record<PaymentOrder["status"], string> = {
   pending: "等待支付", payment_failed: "创建支付失败", paid: "已到账", fulfilling: "正在开通",
   fulfilled: "已完成", fulfillment_failed: "开通失败，客服处理中", expired: "已超时",
   refund_pending: "退款处理中", refunded: "已退款", cancelled: "已取消",
 };
+
+export type BillingSection = "wallet" | "plan" | "orders";
 
 function percentage(current: number, limit: number) {
   if (limit <= 0) return 0;
@@ -28,21 +30,39 @@ function percentage(current: number, limit: number) {
 export function BillingPage({
   account,
   onNavigate,
+  section,
 }: {
   account: AccountProfile | null;
   onNavigate: (path: string) => void;
+  section: BillingSection;
 }) {
   const plan = account?.planConfig ?? getPlanConfig(account?.plan);
   const usage = account?.usage;
   const [orders, setOrders] = useState<PaymentOrder[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(section === "orders");
   const [ordersError, setOrdersError] = useState("");
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [wallet, setWallet] = useState<WalletSummary | null>(null);
+  const [topupYuan, setTopupYuan] = useState("50");
+  const [topupBusy, setTopupBusy] = useState(false);
   useEffect(() => {
+    if (section !== "orders") return;
     let active = true;
+    setOrdersLoading(true);
     getOrders().then((data) => { if (active) setOrders(data); }).catch((cause) => { if (active) setOrdersError(cause instanceof Error ? cause.message : "订单加载失败"); }).finally(() => { if (active) setOrdersLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [section]);
+  useEffect(() => {
+    if (section !== "wallet") return;
+    void getWallet().then(setWallet).catch((cause) => setOrdersError(cause instanceof Error ? cause.message : "余额加载失败"));
+  }, [section]);
+  const handleTopup = async () => {
+    const amountCents = Math.round(Number(topupYuan) * 100);
+    if (!Number.isInteger(amountCents) || amountCents < 100) { setOrdersError("充值金额不能低于 1 元"); return; }
+    setTopupBusy(true); setOrdersError("");
+    try { const checkout = await createWalletTopup(amountCents); sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo); window.location.assign(checkout.payUrl); }
+    catch (cause) { setOrdersError(cause instanceof Error ? cause.message : "充值订单创建失败"); setTopupBusy(false); }
+  };
   const handleCancelOrder = async (orderId: string) => {
     if (cancellingOrderId) return;
     setCancellingOrderId(orderId);
@@ -69,21 +89,32 @@ export function BillingPage({
     `每个项目绑定 ${plan.quotas.site.maxDomainsPerSite} 个域名`,
     "访问流量与传输带宽不单独计量",
   ];
+  const pageMeta = {
+    wallet: { title: "余额与充值", description: "管理账户余额，查看最近的资金变动。" },
+    plan: { title: "套餐与用量", description: "查看当前套餐权益、资源配额和使用进度。" },
+    orders: { title: "订单记录", description: "集中查看套餐、域名和余额充值订单。" },
+  }[section];
 
   return (
     <div className="min-h-dvh bg-black">
       <section className={STUDIO_SECTION_CLASS}>
         <div className={STUDIO_CONTENT_SHELL_CLASS}>
-          <StudioSidebar account={account} active="billing" onNavigate={onNavigate} />
+          <StudioSidebar account={account} active={section === "wallet" ? "wallet" : section === "orders" ? "orders" : "billing"} onNavigate={onNavigate} />
           <main className={STUDIO_MAIN_CLASS}>
             <header className={STUDIO_HEADER_CLASS}>
               <div>
-                <h1 className={STUDIO_TITLE_CLASS}>套餐与账单</h1>
-                <p className="mt-2 text-sm text-zinc-500">查看套餐用量和历史订单。</p>
+                <h1 className={STUDIO_TITLE_CLASS}>{pageMeta.title}</h1>
+                <p className="mt-2 text-sm text-zinc-500">{pageMeta.description}</p>
               </div>
             </header>
 
-            <section className={`${STUDIO_PANEL_CLASS} mt-5 p-5 sm:p-6`} aria-labelledby="plan-title">
+            {section === "wallet" ? <section className={`${STUDIO_PANEL_CLASS} mt-5 p-5 sm:p-6`} aria-labelledby="wallet-title">
+              <div className="flex flex-wrap items-start justify-between gap-5"><div className="flex items-start gap-3"><WalletCards className="mt-0.5 h-5 w-5 text-emerald-400" /><div><p className="text-xs text-zinc-500">账户余额</p><h2 className="mt-1 text-2xl font-semibold tabular-nums text-white" id="wallet-title">¥{((wallet?.balanceCents ?? account?.walletBalanceCents ?? 0) / 100).toFixed(2)}</h2></div></div><div className="flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs text-zinc-500">充值金额（元）<input className="h-9 w-32 rounded-md border border-white/15 bg-black px-3 text-sm text-white outline-none focus:border-white/35" inputMode="decimal" min="1" onChange={(event) => setTopupYuan(event.target.value)} value={topupYuan} /></label><button className="inline-flex h-9 items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black disabled:opacity-50" disabled={topupBusy} onClick={() => void handleTopup()} type="button">{topupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}支付宝充值</button></div></div>
+              {ordersError ? <p className="mt-4 text-sm text-red-300" role="alert">{ordersError}</p> : null}
+              {wallet?.ledger.length ? <div className="mt-5 divide-y divide-white/10 border-t border-white/10">{wallet.ledger.slice(0, 5).map((entry) => <div className="flex items-center justify-between gap-4 py-3 text-sm" key={entry.id}><div><p className="text-zinc-300">{entry.description}</p><p className="mt-1 text-xs text-zinc-600">{new Date(entry.created_at).toLocaleString("zh-CN")}</p></div><span className={entry.amount_cents > 0 ? "tabular-nums text-emerald-400" : "tabular-nums text-zinc-300"}>{entry.amount_cents > 0 ? "+" : ""}¥{(entry.amount_cents / 100).toFixed(2)}</span></div>)}</div> : null}
+            </section> : null}
+
+            {section === "plan" ? <section className={`${STUDIO_PANEL_CLASS} mt-5 p-5 sm:p-6`} aria-labelledby="plan-title">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="flex items-start gap-3">
                   <CreditCard className="mt-0.5 h-5 w-5 text-emerald-400" aria-hidden="true" />
@@ -116,9 +147,9 @@ export function BillingPage({
               <ul className="mt-1 flex flex-wrap gap-x-5 gap-y-2 border-t border-white/10 pt-4 text-xs text-zinc-500">
                 {includedItems.map((item) => <li className="before:mr-2 before:text-zinc-700 before:content-['·']" key={item}>{item}</li>)}
               </ul>
-            </section>
+            </section> : null}
 
-            <section className={`${STUDIO_PANEL_CLASS} mt-5 min-h-80 p-5 sm:p-6`} aria-labelledby="orders-title">
+            {section === "orders" ? <section className={`${STUDIO_PANEL_CLASS} mt-5 min-h-80 p-5 sm:p-6`} aria-labelledby="orders-title">
               <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
                 <div className="flex items-center gap-3">
                   <ReceiptText className="h-5 w-5 text-zinc-400" aria-hidden="true" />
@@ -140,7 +171,7 @@ export function BillingPage({
                   浏览可租赁域名 <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div> : null}
-            </section>
+            </section> : null}
           </main>
         </div>
       </section>

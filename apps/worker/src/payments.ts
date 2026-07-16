@@ -3,7 +3,7 @@ import { bytesToHex } from "@noble/hashes/utils";
 import { normalizeHostname } from "@qingnest/shared/config/domain";
 import { createServiceSupabase, hasServiceSupabase, type Database } from "./supabase";
 import type { Env } from "./types";
-import type { AuthenticatedUser } from "./state";
+import { deleteDomainCache, type AuthenticatedUser } from "./state";
 
 type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 type CheckoutDuration = 1 | 3 | 6 | 12;
@@ -12,7 +12,7 @@ type FmSource = "notify" | "query" | "admin";
 export type OrderView = {
   id: string;
   orderNo: string;
-  type: OrderRow["type"];
+  type: OrderRow["type"] | "wallet_topup";
   status: OrderRow["status"];
   amountCents: number;
   actualAmountCents: number | null;
@@ -181,6 +181,75 @@ async function runCheckout(env: Env, create: () => Promise<OrderRow>) {
   }
 }
 
+async function createFmTopupPayment(env: Env, topup: Database["public"]["Tables"]["wallet_topups"]["Row"]) {
+  const config = fmConfig(env);
+  const amount = fmAmountFromCents(topup.amount_cents);
+  const params = new URLSearchParams({
+    merchantNum: config.merchantNum, orderNo: topup.order_no, amount,
+    notifyUrl: config.notifyUrl, payType: "aloop",
+    sign: digest(`${config.merchantNum}${topup.order_no}${amount}${config.notifyUrl}${config.secret}`),
+    returnUrl: config.returnUrl, returnType: "json", apiMode: "post_form",
+    payDuration: "10", subject: "KuaiPage - 余额充值", body: `KuaiPage 充值 ${topup.order_no}`, attch: topup.id,
+  });
+  const response = await fetch(`${config.apiBaseUrl}/startOrder?${params}`, { method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(8_000) });
+  if (!response.ok) throw new Error(`FM 创建充值订单失败（HTTP ${response.status}）`);
+  const payload = await response.json() as { success?: boolean; code?: number; msg?: string; data?: { id?: string; payUrl?: string } | null };
+  if (!payload.success || payload.code !== 200 || !payload.data?.id || !payload.data.payUrl) throw new Error(payload.msg?.slice(0, 200) || "FM 创建充值订单失败");
+  const payUrl = new URL(payload.data.payUrl);
+  if (!['http:', 'https:'].includes(payUrl.protocol)) throw new Error("FM 返回了无效支付地址");
+  if (env.ENVIRONMENT === "production" && payUrl.protocol !== "https:") throw new Error("FM 返回的支付地址不是 HTTPS");
+  const configuredPayHosts = (env.FM_PAY_URL_HOSTS ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  if (configuredPayHosts.length > 0 && !new Set([new URL(config.apiBaseUrl).hostname, ...configuredPayHosts]).has(payUrl.hostname)) throw new Error(`FM 返回了未授权的支付域名：${payUrl.hostname}`);
+  const { error } = await createServiceSupabase(env).from("wallet_topups").update({ provider_order_id: payload.data.id,
+    pay_url: payUrl.toString(), updated_at: new Date().toISOString() }).eq("id", topup.id).eq("status", "pending");
+  if (error) throw new Error(error.message);
+  return { orderId: topup.id, orderNo: topup.order_no, payUrl: payUrl.toString(), expiresAt: topup.expires_at };
+}
+
+export async function createWalletTopupCheckout(env: Env, user: AuthenticatedUser, amountCents: number) {
+  const { data, error } = await createServiceSupabase(env).rpc("create_wallet_topup", {
+    p_user_id: user.id, p_order_no: orderNo(), p_amount_cents: amountCents, p_expires_at: checkoutExpiry(),
+  });
+  if (error || !data) throw new Error(error?.message ?? "充值订单创建失败");
+  try { return await createFmTopupPayment(env, data); }
+  catch (cause) {
+    const message = cause instanceof Error ? cause.message : "创建充值支付失败";
+    await createServiceSupabase(env).from("wallet_topups").update({ status: "payment_failed", updated_at: new Date().toISOString() }).eq("id", data.id);
+    throw new Error(message);
+  }
+}
+
+export async function getWallet(env: Env, user: AuthenticatedUser) {
+  const supabase = createServiceSupabase(env);
+  await supabase.from("wallet_accounts").upsert({ user_id: user.id }, { onConflict: "user_id", ignoreDuplicates: true });
+  const [{ data: account, error }, { data: ledger, error: ledgerError }] = await Promise.all([
+    supabase.from("wallet_accounts").select("balance_cents").eq("user_id", user.id).single(),
+    supabase.from("wallet_ledger").select("id, amount_cents, balance_after_cents, kind, description, created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
+  ]);
+  if (error || ledgerError) throw new Error(error?.message ?? ledgerError?.message ?? "余额读取失败");
+  return { balanceCents: Number(account.balance_cents), ledger: ledger ?? [] };
+}
+
+export async function purchaseDomainWithWallet(env: Env, user: AuthenticatedUser, hostname: string, hostnameSuffix: string, durationMonths: CheckoutDuration) {
+  const normalized = normalizeHostname(hostname); const suffix = normalizeHostname(hostnameSuffix);
+  if (!normalized.ok) throw new Error(normalized.reason); if (!suffix.ok) throw new Error(suffix.reason);
+  const { data, error } = await createServiceSupabase(env).rpc("purchase_domain_with_wallet", {
+    p_user_id: user.id, p_hostname: normalized.ascii, p_hostname_suffix: suffix.ascii, p_duration_months: durationMonths,
+  });
+  if (error) throw new Error(error.message); return data;
+}
+
+export async function renewDomainWithWallet(env: Env, user: AuthenticatedUser, domainId: string, durationMonths: CheckoutDuration) {
+  const { data, error } = await createServiceSupabase(env).rpc("renew_domain_with_wallet", { p_user_id: user.id, p_domain_id: domainId, p_duration_months: durationMonths });
+  if (error) throw new Error(error.message); return data;
+}
+
+export async function purchasePlanWithWallet(env: Env, user: AuthenticatedUser, planKey: string, durationMonths: CheckoutDuration) {
+  const { data, error } = await createServiceSupabase(env).rpc("purchase_plan_with_wallet", { p_user_id: user.id, p_plan_key: planKey, p_duration_months: durationMonths });
+  if (error) throw new Error(error.message); return data;
+}
+
 function rpcRow<T>(data: T | T[] | null): T {
   if (!data) throw new Error("订单创建失败");
   return Array.isArray(data) ? data[0]! : data;
@@ -228,9 +297,10 @@ export async function createDomainRenewalCheckout(env: Env, user: AuthenticatedU
 
 export async function getDomainRenewalEligibility(env: Env, user: AuthenticatedUser, domainId: string) {
   const supabase = createServiceSupabase(env);
-  const { data: domain, error } = await supabase.from("domains").select("id, user_id, hostname, type, status, expires_at").eq("id", domainId).eq("user_id", user.id).single();
+  const { data: domain, error } = await supabase.from("domains").select("id, user_id, hostname, type, status, expires_at, entitlement_source").eq("id", domainId).eq("user_id", user.id).single();
   if (error) throw new Error(error.message);
   if (domain.type !== "platform_subdomain" || domain.status === "deleted") return { eligible: false, reason: "该域名不支持在线续费", allowedDurations: [] as number[] };
+  if (domain.entitlement_source === "plan_grant") return { eligible: false, reason: "套餐赠送域名无需单独续费", allowedDurations: [] as number[] };
   const { data: prices, error: priceError } = await supabase.from("domain_pricing").select("hostname_suffix, renewal_window_days, max_advance_months").eq("enabled", true).eq("setup_status", "active");
   if (priceError) throw new Error(priceError.message);
   const price = (prices ?? []).filter((item) => domain.hostname.toLowerCase().endsWith(`.${item.hostname_suffix.toLowerCase()}`)).sort((a, b) => b.hostname_suffix.length - a.hostname_suffix.length)[0];
@@ -308,7 +378,18 @@ export async function handleFmNotification(request: Request, env: Env) {
     ? new URLSearchParams((await request.text()).slice(0, 8_193))
     : new URL(request.url).searchParams;
   if (params.toString().length > 8_192) throw new Error("FM 回调请求过大");
-  return confirmPayment(env, verifyFmNotification(env, params), "notify");
+  const payment = verifyFmNotification(env, params);
+  const supabase = createServiceSupabase(env);
+  const { data: topup } = await supabase.from("wallet_topups").select("id").eq("order_no", payment.orderNo).maybeSingle();
+  if (topup) {
+    const { data, error } = await supabase.rpc("confirm_wallet_topup", {
+      p_order_no: payment.orderNo, p_provider_order_id: payment.providerOrderId,
+      p_amount_cents: payment.amountCents, p_actual_amount_cents: payment.actualAmountCents, p_paid_at: payment.paidAt,
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  return confirmPayment(env, payment, "notify");
 }
 
 function orderView(row: OrderRow, actualAmountCents: number | null): OrderView {
@@ -344,8 +425,17 @@ export async function getUserOrder(env: Env, user: AuthenticatedUser, id: string
 export async function getUserOrderByNumber(env: Env, user: AuthenticatedUser, orderNo: string) {
   await expirePendingOrders(env);
   const supabase = createServiceSupabase(env);
-  const { data, error } = await supabase.from("orders").select("*").eq("order_no", orderNo).eq("user_id", user.id).single();
+  const { data, error } = await supabase.from("orders").select("*").eq("order_no", orderNo).eq("user_id", user.id).maybeSingle();
   if (error) throw new Error(error.message);
+  if (!data) {
+    const { data: topup, error: topupError } = await supabase.from("wallet_topups").select("*").eq("order_no", orderNo).eq("user_id", user.id).single();
+    if (topupError) throw new Error(topupError.message);
+    return { id: topup.id, orderNo: topup.order_no, type: "wallet_topup" as const, status: topup.status === "paid" ? "fulfilled" as const : topup.status,
+      amountCents: topup.amount_cents, actualAmountCents: topup.actual_amount_cents,
+      productName: "余额充值", productSnapshot: {}, expiresAt: topup.expires_at,
+      paidAt: topup.paid_at, fulfilledAt: topup.paid_at, failureMessage: null,
+      payUrl: topup.status === "pending" ? topup.pay_url : null, createdAt: topup.created_at };
+  }
   const { data: payment } = await supabase.from("payments").select("actual_amount_cents").eq("order_id", data.id).eq("status", "success").maybeSingle();
   return orderView(data, payment?.actual_amount_cents ?? null);
 }
@@ -438,8 +528,12 @@ export async function runPaymentLifecycle(env: Env) {
   const supabase = createServiceSupabase(env);
   const now = new Date().toISOString();
   await expirePendingOrders(env);
+  await supabase.from("wallet_topups").update({ status: "expired", updated_at: now }).eq("status", "pending").lt("expires_at", now);
   await supabase.from("domain_reservations").update({ status: "released", updated_at: now }).eq("status", "active").lt("expires_at", now);
   await supabase.from("profiles").update({ plan: "free", plan_expires_at: null }).not("plan_expires_at", "is", null).lte("plan_expires_at", now);
+  const { data: reclaimed, error: reconcileError } = await supabase.rpc("reconcile_domain_entitlements");
+  if (reconcileError) throw new Error(reconcileError.message);
+  await Promise.all((reclaimed ?? []).map((domain) => deleteDomainCache(env, domain.hostname)));
   const { data: jobs } = await supabase.from("fulfillment_jobs").select("order_id").eq("status", "failed").lte("next_attempt_at", now).limit(20);
   for (const job of jobs ?? []) {
     try { await retryOrderFulfillment(env, job.order_id); } catch { /* The job keeps its failure state for admin review. */ }

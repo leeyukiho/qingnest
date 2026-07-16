@@ -13,6 +13,7 @@ import {
   createDraftSite,
   createAdminPrivatePreview,
   createPublicSlot,
+  claimFreePublicSlot,
   createPrivatePreview,
   createUploadSession,
   deleteProject,
@@ -49,8 +50,6 @@ import type { Env } from "./types";
 import { getCapacityDashboard, updateCapacitySettings } from "./capacity";
 import {
   cancelUserOrder,
-  createDomainCheckout,
-  createDomainRenewalCheckout,
   createPlanCheckout,
   getUserOrder,
   getUserOrderByNumber,
@@ -62,13 +61,18 @@ import {
   recordAdminRefund,
   replaceFailedDomain,
   retryOrderFulfillment,
+  createWalletTopupCheckout,
+  getWallet,
+  purchaseDomainWithWallet,
+  renewDomainWithWallet,
+  purchasePlanWithWallet,
 } from "./payments";
 
 type SiteCreateInput = {
   name?: string;
 };
 
-type PublicSlotInput = { siteId?: string; subdomain?: string };
+type PublicSlotInput = { siteId?: string; subdomain?: string; hostnameSuffix?: string };
 type PublicSlotUpdateInput = { siteId?: string | null };
 
 type SiteUpdateInput = { name?: string };
@@ -203,8 +207,9 @@ export async function handleApi(request: Request, env: Env) {
     if (request.method === "POST" && url.pathname === "/api/orders/plan") {
       const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
       if (!user) return problem("请先登录", 401);
-      const input = await readJson<CheckoutInput & { planKey?: string }>(request);
+      const input = await readJson<CheckoutInput & { planKey?: string; paymentMethod?: "wallet" | "alipay" }>(request);
       if (!input.planKey || !input.durationMonths) return problem("请选择套餐和购买周期", 400);
+      if (input.paymentMethod === "wallet") return json(await purchasePlanWithWallet(env, user, input.planKey, input.durationMonths), { status: 201 });
       return json(await createPlanCheckout(env, user, input.planKey, input.durationMonths), { status: 201 });
     }
 
@@ -213,7 +218,7 @@ export async function handleApi(request: Request, env: Env) {
       if (!user) return problem("请先登录", 401);
       const input = await readJson<CheckoutInput & { hostname?: string; hostnameSuffix?: string }>(request);
       if (!input.hostname || !input.hostnameSuffix || !input.durationMonths) return problem("请选择域名和租赁周期", 400);
-      return json(await createDomainCheckout(env, user, input.hostname, input.hostnameSuffix, input.durationMonths), { status: 201 });
+      return json(await purchaseDomainWithWallet(env, user, input.hostname, input.hostnameSuffix, input.durationMonths), { status: 201 });
     }
 
     if (request.method === "POST" && url.pathname === "/api/orders/domain-renewal") {
@@ -221,7 +226,21 @@ export async function handleApi(request: Request, env: Env) {
       if (!user) return problem("请先登录", 401);
       const input = await readJson<CheckoutInput & { domainId?: string }>(request);
       if (!input.domainId || !input.durationMonths) return problem("请选择域名和续费周期", 400);
-      return json(await createDomainRenewalCheckout(env, user, input.domainId, input.durationMonths), { status: 201 });
+      return json(await renewDomainWithWallet(env, user, input.domainId, input.durationMonths), { status: 201 });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/wallet") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await getWallet(env, user));
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/wallet/topups") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      const input = await readJson<{ amountCents?: number }>(request);
+      if (!Number.isInteger(input.amountCents)) return problem("请输入有效的充值金额", 400);
+      return json(await createWalletTopupCheckout(env, user, input.amountCents!), { status: 201 });
     }
 
     if (request.method === "GET" && url.pathname === "/api/orders") {
@@ -491,6 +510,19 @@ export async function handleApi(request: Request, env: Env) {
         }),
         { status: 201 },
       );
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/public-slots/claim") {
+      const input = await readJson<PublicSlotInput>(request);
+      if (!input.subdomain || !input.hostnameSuffix)
+        return problem("缺少域名前缀或后缀");
+      const user = await maybeGetUser(request, env);
+      if (!user) return problem("请先登录", 401);
+      return json(await claimFreePublicSlot(env, {
+        subdomain: input.subdomain,
+        hostnameSuffix: input.hostnameSuffix,
+        user,
+      }), { status: 201 });
     }
 
     if (

@@ -132,6 +132,7 @@ export type AccountProfile = {
   role: AccountRole;
   plan: string;
   subscriptionExpiresAt: string | null;
+  walletBalanceCents: number;
   planConfig?: ReturnType<typeof import("@qingnest/shared/config/platform").getPlanConfig>;
   createdAt: string;
   usage: {
@@ -209,8 +210,9 @@ export type AdminOverview = {
 export type AdminDomain = { id: string; userId: string; ownerEmail: string; siteId: string | null; siteName: string | null; hostname: string; type: "platform_subdomain" | "custom_domain"; status: "active" | "pending_review" | "blocked" | "deleted"; createdAt: string };
 export type AdminPlan = { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour: number; max_domains_per_site: number; max_site_bytes: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
 export type PublicPlan = AdminPlan;
-export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; renewal_window_days: number; max_advance_months: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
-export type PaymentOrder = { id: string; orderNo: string; type: "plan_subscription" | "domain_rental" | "domain_renewal"; status: "pending" | "payment_failed" | "paid" | "fulfilling" | "fulfilled" | "fulfillment_failed" | "expired" | "refund_pending" | "refunded" | "cancelled"; amountCents: number; actualAmountCents: number | null; productName: string; productSnapshot: unknown; expiresAt: string; paidAt: string | null; fulfilledAt: string | null; failureMessage: string | null; payUrl: string | null; createdAt: string };
+export type AdminDomainPrice = { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; renewal_window_days: number; max_advance_months: number; enabled: boolean; free_claim_enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
+export type PaymentOrder = { id: string; orderNo: string; type: "plan_subscription" | "domain_rental" | "domain_renewal" | "wallet_topup"; status: "pending" | "payment_failed" | "paid" | "fulfilling" | "fulfilled" | "fulfillment_failed" | "expired" | "refund_pending" | "refunded" | "cancelled"; amountCents: number; actualAmountCents: number | null; productName: string; productSnapshot: unknown; expiresAt: string; paidAt: string | null; fulfilledAt: string | null; failureMessage: string | null; payUrl: string | null; createdAt: string };
+export type WalletSummary = { balanceCents: number; ledger: Array<{ id: string; amount_cents: number; balance_after_cents: number; kind: "topup" | "domain_purchase" | "domain_renewal" | "plan_purchase" | "admin_adjustment"; description: string; created_at: string }> };
 export type CheckoutResult = { orderId: string; orderNo: string; payUrl: string; expiresAt: string };
 export type AdminPaymentOrder = { id: string; order_no: string; user_id: string; type: PaymentOrder["type"]; status: PaymentOrder["status"]; amount_cents: number; product_name: string; product_snapshot: unknown; provider_order_id: string | null; expires_at: string; paid_at: string | null; fulfilled_at: string | null; failure_message: string | null; created_at: string; updated_at: string };
 export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
@@ -364,7 +366,7 @@ export async function updateAdminCapacity(input: CapacityDashboard["settings"]) 
   return data;
 }
 
-export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "enabled">;
+export type PlatformDomainOption = Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "enabled" | "free_claim_enabled">;
 let platformDomainCatalogRequest: Promise<PlatformDomainOption[]> | null = null;
 export const getPlatformDomainCatalog = () => {
   platformDomainCatalogRequest ??= request<PlatformDomainOption[]>("/api/domain-catalog");
@@ -419,6 +421,8 @@ export type PublicSlot = {
   type: "platform_subdomain" | "custom_domain";
   status: "active" | "pending_review" | "blocked";
   expiresAt: string;
+  entitlementSource: "plan_grant" | "paid_rental";
+  graceExpiresAt: string | null;
 };
 
 export async function listPublicSlots() {
@@ -458,6 +462,18 @@ export async function createPublicSlot(input: {
   return slot;
 }
 
+export async function claimFreePublicSlot(subdomain: string, hostnameSuffix: string) {
+  const slot = await request<PublicSlot>("/api/public-slots/claim", {
+    method: "POST",
+    body: JSON.stringify({ subdomain, hostnameSuffix }),
+  });
+  publicSlotsCache = null;
+  publicSlotsCachedAt = 0;
+  subdomainCheckCache.delete(`${subdomain.trim().toLowerCase()}.${hostnameSuffix}`);
+  notifyAccountChanged();
+  return slot;
+}
+
 export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string, durationMonths: 1 | 3 | 6 | 12 = 12) {
   const slot = await request<PublicSlot>("/api/public-slots/rent", {
     method: "POST",
@@ -470,9 +486,23 @@ export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string,
   return slot;
 }
 
-export const createPlanPayment = (planKey: string, durationMonths: 1 | 3 | 6 | 12 = 1) => request<CheckoutResult>("/api/orders/plan", { method: "POST", body: JSON.stringify({ planKey, durationMonths }) });
-export const createDomainPayment = (hostname: string, hostnameSuffix: string, durationMonths: 1 | 3 | 6 | 12) => request<CheckoutResult>("/api/orders/domain", { method: "POST", body: JSON.stringify({ hostname, hostnameSuffix, durationMonths }) });
-export const createDomainRenewalPayment = (domainId: string, durationMonths: 1 | 3 | 6 | 12) => request<CheckoutResult>("/api/orders/domain-renewal", { method: "POST", body: JSON.stringify({ domainId, durationMonths }) });
+export async function createPlanPayment(planKey: string, durationMonths: 1 | 3 | 6 | 12 = 1, paymentMethod: "wallet" | "alipay" = "alipay") {
+  const result = await request<CheckoutResult | { planKey: string; balanceCents: number }>("/api/orders/plan", { method: "POST", body: JSON.stringify({ planKey, durationMonths, paymentMethod }) });
+  if (!("payUrl" in result)) notifyAccountChanged();
+  return result;
+}
+export async function createDomainPayment(hostname: string, hostnameSuffix: string, durationMonths: 1 | 3 | 6 | 12) {
+  const result = await request<{ domainId: string; balanceCents: number }>("/api/orders/domain", { method: "POST", body: JSON.stringify({ hostname, hostnameSuffix, durationMonths }) });
+  publicSlotsCache = null; publicSlotsCachedAt = 0; notifyAccountChanged();
+  return result;
+}
+export async function createDomainRenewalPayment(domainId: string, durationMonths: 1 | 3 | 6 | 12) {
+  const result = await request<{ domainId: string; balanceCents: number }>("/api/orders/domain-renewal", { method: "POST", body: JSON.stringify({ domainId, durationMonths }) });
+  publicSlotsCache = null; publicSlotsCachedAt = 0; notifyAccountChanged();
+  return result;
+}
+export const getWallet = () => request<WalletSummary>("/api/wallet");
+export const createWalletTopup = (amountCents: number) => request<CheckoutResult>("/api/wallet/topups", { method: "POST", body: JSON.stringify({ amountCents }) });
 export const getOrders = () => request<PaymentOrder[]>("/api/orders");
 export const getOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`);
 export const cancelOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`, { method: "DELETE" });

@@ -33,6 +33,24 @@ export type Database = {
         };
         Relationships: EmptyRelationships;
       };
+      wallet_accounts: {
+        Row: { user_id: string; balance_cents: number; updated_at: string };
+        Insert: { user_id: string; balance_cents?: number; updated_at?: string };
+        Update: { balance_cents?: number; updated_at?: string };
+        Relationships: EmptyRelationships;
+      };
+      wallet_ledger: {
+        Row: { id: string; user_id: string; amount_cents: number; balance_after_cents: number; kind: "topup" | "domain_purchase" | "domain_renewal" | "plan_purchase" | "admin_adjustment"; reference_type: string; reference_id: string; description: string; created_at: string };
+        Insert: Omit<Database["public"]["Tables"]["wallet_ledger"]["Row"], "id" | "created_at"> & { id?: string; created_at?: string };
+        Update: Record<string, never>;
+        Relationships: EmptyRelationships;
+      };
+      wallet_topups: {
+        Row: { id: string; order_no: string; user_id: string; status: "pending" | "payment_failed" | "paid" | "expired" | "cancelled"; amount_cents: number; actual_amount_cents: number | null; provider_order_id: string | null; pay_url: string | null; expires_at: string; paid_at: string | null; created_at: string; updated_at: string };
+        Insert: { id?: string; order_no: string; user_id: string; status?: "pending" | "payment_failed" | "paid" | "expired" | "cancelled"; amount_cents: number; actual_amount_cents?: number | null; provider_order_id?: string | null; pay_url?: string | null; expires_at: string; paid_at?: string | null; created_at?: string; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["wallet_topups"]["Insert"]>;
+        Relationships: EmptyRelationships;
+      };
       auth_email_sends: {
         Row: {
           email: string;
@@ -95,6 +113,8 @@ export type Database = {
           created_at: string;
           expires_at: string;
           last_binding_change_at: string | null;
+          entitlement_source: "plan_grant" | "paid_rental";
+          grace_expires_at: string | null;
         };
         Insert: {
           id?: string;
@@ -106,12 +126,16 @@ export type Database = {
           created_at?: string;
           expires_at?: string;
           last_binding_change_at?: string | null;
+          entitlement_source?: "plan_grant" | "paid_rental";
+          grace_expires_at?: string | null;
         };
         Update: {
           site_id?: string | null;
           status?: "active" | "pending_review" | "blocked" | "deleted";
           expires_at?: string;
           last_binding_change_at?: string | null;
+          entitlement_source?: "plan_grant" | "paid_rental";
+          grace_expires_at?: string | null;
         };
         Relationships: EmptyRelationships;
       };
@@ -246,14 +270,14 @@ export type Database = {
         Relationships: EmptyRelationships;
       };
       plan_catalog: {
-        Row: { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour: number; max_domains_per_site: number; max_site_bytes: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
-        Insert: { key: string; label: string; enabled?: boolean; monthly_price_cents?: number; renewal_price_cents?: number; max_sites: number; max_public_sites: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour?: number; max_domains_per_site: number; max_site_bytes?: number; max_files?: number; custom_domain?: boolean; password_protection?: boolean; access_analytics?: boolean; remove_branding?: boolean; rollback?: boolean; source_build?: boolean; updated_at?: string };
+        Row: { key: string; label: string; enabled: boolean; monthly_price_cents: number; renewal_price_cents: number; max_sites: number; max_public_sites: number; max_free_domains: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour: number; max_domains_per_site: number; max_site_bytes: number; max_files: number; custom_domain: boolean; password_protection: boolean; access_analytics: boolean; remove_branding: boolean; rollback: boolean; source_build: boolean; updated_at: string };
+        Insert: { key: string; label: string; enabled?: boolean; monthly_price_cents?: number; renewal_price_cents?: number; max_sites: number; max_public_sites: number; max_free_domains?: number; max_storage_bytes: number; max_deployments_per_day: number; max_upload_sessions_per_hour?: number; max_domains_per_site: number; max_site_bytes?: number; max_files?: number; custom_domain?: boolean; password_protection?: boolean; access_analytics?: boolean; remove_branding?: boolean; rollback?: boolean; source_build?: boolean; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["plan_catalog"]["Insert"]>;
         Relationships: EmptyRelationships;
       };
       domain_pricing: {
-        Row: { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; renewal_window_days: number; max_advance_months: number; enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
-        Insert: { domain_type: string; label: string; hostname_suffix: string; price_cents?: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents?: number; quarterly_price_cents?: number; semiannual_price_cents?: number; annual_price_cents?: number; renewal_window_days?: number; max_advance_months?: number; enabled?: boolean; cloudflare_zone_id?: string | null; cloudflare_zone_status?: string | null; cloudflare_nameservers?: string[]; cloudflare_dns_record_id?: string | null; cloudflare_worker_route_id?: string | null; setup_status?: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error?: string | null; last_checked_at?: string | null; next_check_at?: string | null; updated_at?: string };
+        Row: { domain_type: string; label: string; hostname_suffix: string; price_cents: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents: number; quarterly_price_cents: number; semiannual_price_cents: number; annual_price_cents: number; renewal_window_days: number; max_advance_months: number; enabled: boolean; free_claim_enabled: boolean; cloudflare_zone_id: string | null; cloudflare_zone_status: string | null; cloudflare_nameservers: string[]; cloudflare_dns_record_id: string | null; cloudflare_worker_route_id: string | null; setup_status: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error: string | null; last_checked_at: string | null; next_check_at: string | null; updated_at: string };
+        Insert: { domain_type: string; label: string; hostname_suffix: string; price_cents?: number; billing_period: "month" | "year" | "one_time"; monthly_price_cents?: number; quarterly_price_cents?: number; semiannual_price_cents?: number; annual_price_cents?: number; renewal_window_days?: number; max_advance_months?: number; enabled?: boolean; free_claim_enabled?: boolean; cloudflare_zone_id?: string | null; cloudflare_zone_status?: string | null; cloudflare_nameservers?: string[]; cloudflare_dns_record_id?: string | null; cloudflare_worker_route_id?: string | null; setup_status?: "pending_zone" | "pending_nameservers" | "configuring" | "active" | "error"; setup_error?: string | null; last_checked_at?: string | null; next_check_at?: string | null; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["domain_pricing"]["Insert"]>;
         Relationships: EmptyRelationships;
       };
@@ -312,6 +336,13 @@ export type Database = {
       create_plan_payment_order: { Args: { p_user_id: string; p_order_no: string; p_plan_key: string; p_duration_months: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["orders"]["Row"] };
       create_domain_payment_order: { Args: { p_user_id: string; p_order_no: string; p_hostname: string; p_hostname_suffix: string; p_duration_months: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["orders"]["Row"] };
       create_domain_renewal_order: { Args: { p_user_id: string; p_order_no: string; p_domain_id: string; p_duration_months: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["orders"]["Row"] };
+      claim_free_platform_domain: { Args: { p_user_id: string; p_hostname: string; p_hostname_suffix: string; p_status: string; p_site_id?: string | null }; Returns: Database["public"]["Tables"]["domains"]["Row"] };
+      create_wallet_topup: { Args: { p_user_id: string; p_order_no: string; p_amount_cents: number; p_expires_at: string }; Returns: Database["public"]["Tables"]["wallet_topups"]["Row"] };
+      confirm_wallet_topup: { Args: { p_order_no: string; p_provider_order_id: string; p_amount_cents: number; p_actual_amount_cents: number; p_paid_at: string }; Returns: Json };
+      purchase_domain_with_wallet: { Args: { p_user_id: string; p_hostname: string; p_hostname_suffix: string; p_duration_months: number }; Returns: Json };
+      renew_domain_with_wallet: { Args: { p_user_id: string; p_domain_id: string; p_duration_months: number }; Returns: Json };
+      purchase_plan_with_wallet: { Args: { p_user_id: string; p_plan_key: string; p_duration_months: number }; Returns: Json };
+      reconcile_domain_entitlements: { Args: Record<string, never>; Returns: { hostname: string }[] };
       confirm_fm_payment: { Args: { p_order_no: string; p_provider_order_id: string; p_channel_order_no: string; p_amount_cents: number; p_actual_amount_cents: number; p_pay_type: string; p_payee: string; p_paid_at: string; p_source: "notify" | "query" | "admin"; p_raw_payload: Json }; Returns: Json };
       record_order_refund: { Args: { p_order_id: string; p_operator_id: string; p_reason: string; p_channel_reference: string }; Returns: Json };
     };
