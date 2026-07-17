@@ -81,7 +81,7 @@ export function ProjectsPage({ account, authReady, onNavigate, session }: {
                         <h2 className="truncate text-base font-semibold text-white">{project.name}</h2>
                         {project.visibility === "public" ? <a className="mt-2 flex min-w-0 items-center gap-1.5 text-sm text-zinc-300 transition-colors hover:text-white" href={project.publicUrl} rel="noreferrer" target="_blank"><Globe2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{project.publicUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span><ExternalLink className="h-3.5 w-3.5 shrink-0" /></a> : <p className="mt-2 flex items-center gap-1.5 text-sm text-zinc-500"><Lock className="h-3.5 w-3.5 shrink-0" />仅自己可见</p>}
                       </div>
-                      <span className={`shrink-0 rounded-md border px-2 py-1 text-xs font-medium ${project.visibility === "public" ? "border-emerald-400/35 bg-emerald-400/10 text-emerald-300" : "border-white/10 text-zinc-500"}`}>{project.visibility === "public" ? "公开中" : getStatusLabel(project.status)}</span>
+                      <span className={`shrink-0 rounded-md border px-2 py-1 text-xs font-medium ${project.status === "blocked" ? "border-red-400/40 bg-red-400/10 text-red-300" : project.visibility === "public" ? "border-emerald-400/35 bg-emerald-400/10 text-emerald-300" : "border-white/10 text-zinc-500"}`}>{project.status === "blocked" ? "已封禁" : project.visibility === "public" ? "公开中" : getStatusLabel(project.status)}</span>
                     </div>
                     <p className="mt-5 text-xs text-zinc-600">更新于 {new Date(project.updatedAt).toLocaleString("zh-CN")}</p>
                     <div className="mt-auto flex items-center gap-2 pt-5">
