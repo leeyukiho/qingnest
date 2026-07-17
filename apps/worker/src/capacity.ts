@@ -74,10 +74,10 @@ async function fetchCloudflareCapacity(env: Env): Promise<ProviderSample> {
   const start = `${monthStart()}T00:00:00.000Z`;
   const query = `query Capacity($accountTag: string!, $start: Time!, $end: Time!, $startDate: Date!, $endDate: Date!, $scriptName: string!, $bucketName: string, $namespaceId: string) {
     viewer { accounts(filter: { accountTag: $accountTag }) {
-      workersInvocationsAdaptive(limit: 10000, filter: { scriptName: $scriptName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } }
-      kvOperationsAdaptiveGroups(limit: 10000, filter: { namespaceId: $namespaceId, date_geq: $startDate, date_leq: $endDate }) { sum { requests } dimensions { actionType } }
-      r2OperationsAdaptiveGroups(limit: 10000, filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } dimensions { actionType } }
-      r2StorageAdaptiveGroups(limit: 1, filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { max { payloadSize metadataSize } }
+      workersInvocationsAdaptive(limit: 10000, orderBy: [sum_requests_DESC], filter: { scriptName: $scriptName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } dimensions { scriptName status } }
+      kvOperationsAdaptiveGroups(limit: 10000, orderBy: [sum_requests_DESC], filter: { namespaceId: $namespaceId, date_geq: $startDate, date_leq: $endDate }) { sum { requests } dimensions { date actionType } }
+      r2OperationsAdaptiveGroups(limit: 10000, orderBy: [sum_requests_DESC], filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } dimensions { datetime actionType } }
+      r2StorageAdaptiveGroups(limit: 1, orderBy: [datetime_DESC], filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { max { payloadSize metadataSize } dimensions { datetime } }
     } }
   }`;
   const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {

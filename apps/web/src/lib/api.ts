@@ -15,6 +15,7 @@ let accessTokenProvider: (() => Promise<string | null>) | null = null;
 export function setAccessTokenProvider(
   provider: (() => Promise<string | null>) | null,
 ) {
+  clearAccountReadCaches();
   accessTokenProvider = provider;
 }
 
@@ -146,6 +147,10 @@ export type AccountProfile = {
 
 const ACCOUNT_CHANGED_EVENT = "kuaipage:account-changed";
 const READ_CACHE_TTL_MS = 60 * 1000;
+const ACCOUNT_READ_CACHE_TTL_MS = 5 * 60 * 1000;
+const accountReadCache = new Map<string, { data: unknown; expiresAt: number }>();
+const accountReadRequests = new Map<string, Promise<unknown>>();
+let accountReadCacheGeneration = 0;
 let projectsCache: ProjectSummary[] | null = null;
 let projectsCachedAt = 0;
 const projectCache = new Map<string, ProjectDetail>();
@@ -156,6 +161,40 @@ const subdomainCheckCache = new Map<
   string,
   { expiresAt: number; request: Promise<SubdomainCheck> }
 >();
+
+function clearAccountReadCaches() {
+  accountReadCacheGeneration += 1;
+  accountReadCache.clear();
+  accountReadRequests.clear();
+}
+
+async function cachedAccountRead<T>(
+  key: string,
+  load: () => Promise<T>,
+  shouldCache: (data: T) => boolean = () => true,
+) {
+  const cached = accountReadCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.data as T;
+  const activeRequest = accountReadRequests.get(key);
+  if (activeRequest) return activeRequest as Promise<T>;
+
+  const generation = accountReadCacheGeneration;
+  const pending = load().then((data) => {
+    if (generation === accountReadCacheGeneration && shouldCache(data)) {
+      accountReadCache.set(key, {
+        data,
+        expiresAt: Date.now() + ACCOUNT_READ_CACHE_TTL_MS,
+      });
+    }
+    return data;
+  });
+  accountReadRequests.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    if (accountReadRequests.get(key) === pending) accountReadRequests.delete(key);
+  }
+}
 
 function notifyAccountChanged() {
   window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT));
@@ -350,6 +389,11 @@ export async function acknowledgeNotification(id: string) {
   }
   return result;
 }
+export async function acknowledgeAllNotifications() {
+  const result = await request<{ acknowledgedAt: string }>("/api/notifications/acknowledge-all", { method: "POST" });
+  if (notificationsCache) notificationsCache = { ...notificationsCache, data: notificationsCache.data.map((item) => ({ ...item, acknowledgedAt: result.acknowledgedAt })) };
+  return result;
+}
 export const getAdminNotifications = () => request<AdminNotification[]>("/api/admin/notifications");
 export const createAdminNotification = (input: { title: string; body: string; audience: "all" | "user"; recipient?: string }) => adminMutation<AdminNotification>("/api/admin/notifications", "POST", input);
 export async function getAdminCapacity(force = false) {
@@ -490,31 +534,53 @@ export async function rentPublicSlot(subdomain: string, hostnameSuffix?: string,
 
 export async function createPlanPayment(planKey: string, durationMonths: 1 | 3 | 6 | 12 = 1, paymentMethod: "wallet" | "alipay" = "alipay") {
   const result = await request<CheckoutResult | { planKey: string; balanceCents: number }>("/api/orders/plan", { method: "POST", body: JSON.stringify({ planKey, durationMonths, paymentMethod }) });
+  clearAccountReadCaches();
   if (!("payUrl" in result)) notifyAccountChanged();
   return result;
 }
 export async function createDomainPayment(hostname: string, hostnameSuffix: string, durationMonths: 1 | 3 | 6 | 12) {
   const result = await request<{ domainId: string; balanceCents: number }>("/api/orders/domain", { method: "POST", body: JSON.stringify({ hostname, hostnameSuffix, durationMonths }) });
+  clearAccountReadCaches();
   publicSlotsCache = null; publicSlotsCachedAt = 0; notifyAccountChanged();
   return result;
 }
 export async function createDomainRenewalPayment(domainId: string, durationMonths: 1 | 3 | 6 | 12) {
   const result = await request<{ domainId: string; balanceCents: number }>("/api/orders/domain-renewal", { method: "POST", body: JSON.stringify({ domainId, durationMonths }) });
+  clearAccountReadCaches();
   publicSlotsCache = null; publicSlotsCachedAt = 0; notifyAccountChanged();
   return result;
 }
-export const getWallet = () => request<WalletSummary>("/api/wallet");
-export const createWalletTopup = (amountCents: number) => {
+export const getWallet = () => cachedAccountRead("wallet", () => request<WalletSummary>("/api/wallet"));
+export const createWalletTopup = async (amountCents: number) => {
   if (!Number.isSafeInteger(amountCents) || amountCents < 500 || amountCents > 100_000_000) {
     throw new Error("充值金额必须在 5 元至 100 万元之间，且最多保留两位小数");
   }
-  return request<CheckoutResult>("/api/wallet/topups", { method: "POST", body: JSON.stringify({ amountCents }) });
+  const result = await request<CheckoutResult>("/api/wallet/topups", { method: "POST", body: JSON.stringify({ amountCents }) });
+  clearAccountReadCaches();
+  return result;
 };
-export const getOrders = () => request<PaymentOrder[]>("/api/orders");
-export const getOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`);
-export const cancelOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`, { method: "DELETE" });
-export const getOrderByNumber = (orderNo: string) => request<PaymentOrder>(`/api/orders?orderNo=${encodeURIComponent(orderNo)}`);
-export const getDomainRenewalEligibility = (domainId: string) => request<{ eligible: boolean; reason: string | null; allowedDurations: Array<1 | 3 | 6 | 12>; renewalWindowDays?: number; maxAdvanceMonths?: number }>(`/api/domains/${encodeURIComponent(domainId)}/renewal-eligibility`);
+const mutableOrderStatuses = new Set<PaymentOrder["status"]>(["pending", "paid", "fulfilling", "refund_pending"]);
+const isStableOrder = (order: PaymentOrder) => !mutableOrderStatuses.has(order.status);
+export const getOrders = () => cachedAccountRead("orders", () => request<PaymentOrder[]>("/api/orders"), (orders) => orders.every(isStableOrder));
+export const getOrder = (id: string) => cachedAccountRead(`order:${id}`, () => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`), isStableOrder);
+export const cancelOrder = async (id: string) => {
+  const order = await request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`, { method: "DELETE" });
+  clearAccountReadCaches();
+  accountReadCache.set(`order:${id}`, { data: order, expiresAt: Date.now() + ACCOUNT_READ_CACHE_TTL_MS });
+  return order;
+};
+export const getOrderByNumber = async (orderNo: string) => {
+  const order = await request<PaymentOrder>(`/api/orders?orderNo=${encodeURIComponent(orderNo)}`);
+  if (isStableOrder(order)) {
+    clearAccountReadCaches();
+    accountReadCache.set(`order:${order.id}`, { data: order, expiresAt: Date.now() + ACCOUNT_READ_CACHE_TTL_MS });
+  }
+  return order;
+};
+export const getDomainRenewalEligibility = (domainId: string) => cachedAccountRead(
+  `domain-renewal:${domainId}`,
+  () => request<{ eligible: boolean; reason: string | null; allowedDurations: Array<1 | 3 | 6 | 12>; renewalWindowDays?: number; maxAdvanceMonths?: number }>(`/api/domains/${encodeURIComponent(domainId)}/renewal-eligibility`),
+);
 
 export async function switchPublicSlot(slotId: string, siteId: string | null) {
   const previousSiteId = publicSlotsCache?.find(

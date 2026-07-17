@@ -27,6 +27,8 @@ import {
   STUDIO_WALLET_PATH
 } from "@/app/navigation";
 import { cn } from "@/lib/utils";
+import { getNotifications } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 type StudioNavItem = {
   active: boolean;
@@ -52,6 +54,16 @@ export function StudioSidebar({
   active: StudioActiveNav;
   onNavigate: (path: string) => void;
 }) {
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void getNotifications().then((items) => {
+      if (active) setUnreadCount(items.filter((item) => !item.acknowledgedAt).length);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
   const navGroups: StudioNavGroup[] = [
     {
       label: "建站与发布",
@@ -189,6 +201,7 @@ export function StudioSidebar({
                       <span className="block truncate text-sm font-medium">{item.label}</span>
                       <span className={cn("mt-0.5 hidden truncate text-[11px] lg:block", item.active ? "text-zinc-400" : "text-zinc-600 group-hover:text-zinc-500")}>{item.description}</span>
                     </span>
+                    {item.icon === Bell && unreadCount > 0 ? <span aria-label={`${unreadCount} 条未读通知`} className="flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">{Math.min(unreadCount, 99)}</span> : null}
                   </button>
                 );
               })}

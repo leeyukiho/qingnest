@@ -1059,11 +1059,18 @@ export async function acknowledgeNotification(env: Env, user: AuthenticatedUser,
   return { acknowledgedAt: data };
 }
 
+export async function acknowledgeAllNotifications(env: Env, user: AuthenticatedUser) {
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await (supabase as any).rpc("acknowledge_all_user_notifications", { p_user_id: user.id });
+  if (error) throw new Error(error.message);
+  return { acknowledgedAt: data ?? new Date().toISOString() };
+}
+
 export async function getAdminNotifications(env: Env, user: AuthenticatedUser) {
   const supabase = await requireAdmin(env, user);
-  const { data, error } = await (supabase as any).from("notifications").select("id, title, body, audience, created_at, profiles!notifications_user_id_fkey(email), creator:profiles!notifications_created_by_fkey(email)").order("created_at", { ascending: false }).limit(100);
+  const { data, error } = await (supabase as any).from("notifications").select("id, title, audience, created_at, profiles!notifications_user_id_fkey(email), creator:profiles!notifications_created_by_fkey(email)").order("created_at", { ascending: false }).limit(100);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((item: any) => ({ id: item.id, title: item.title, body: item.body, audience: item.audience, acknowledgedAt: null, recipientEmail: item.profiles?.email ?? null, createdByEmail: item.creator?.email ?? "", createdAt: item.created_at }));
+  return (data ?? []).map((item: any) => ({ id: item.id, title: item.title, body: "", audience: item.audience, acknowledgedAt: null, recipientEmail: item.profiles?.email ?? null, createdByEmail: item.creator?.email ?? "", createdAt: item.created_at }));
 }
 
 export async function createAdminNotification(env: Env, user: AuthenticatedUser, input: { title?: string; body?: string; audience?: "all" | "user"; recipient?: string }) {

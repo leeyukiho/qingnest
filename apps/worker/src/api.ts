@@ -39,6 +39,7 @@ import {
   deleteAdminDomainPrice,
   syncAdminDomainPrice,
   acknowledgeNotification,
+  acknowledgeAllNotifications,
   createAdminNotification,
   getAdminNotifications,
   getNotifications,
@@ -345,6 +346,12 @@ export async function handleApi(request: Request, env: Env) {
       const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
       if (!user) return problem("请先登录", 401);
       return json(await acknowledgeNotification(env, user, decodeURIComponent(notificationAckMatch[1] ?? "")));
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/notifications/acknowledge-all") {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("璇峰厛鐧诲綍", 401);
+      return json(await acknowledgeAllNotifications(env, user));
     }
 
     if (url.pathname === "/api/admin/notifications" && request.method === "GET") {

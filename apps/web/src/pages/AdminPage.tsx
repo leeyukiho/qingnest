@@ -785,7 +785,7 @@ function NotificationsPanel({ users }: { users: AdminOverview["recentUsers"] }) 
       </div>
       <div className="mt-7">
         <SectionHeading title="发送记录" description="最近 100 条通知，按发送时间倒序排列。" />
-        <DataTable headers={["标题", "范围", "正文", "发送时间"]}>
+        <DataTable headers={["标题", "范围", "发送时间"]}>
           {items.map((item) => (
             <tr className="border-b border-white/10 last:border-0" key={item.id}>
               <Cell>
@@ -793,9 +793,6 @@ function NotificationsPanel({ users }: { users: AdminOverview["recentUsers"] }) 
                 <span className="mt-1 block text-xs text-zinc-600">由 {item.createdByEmail || "管理员"} 发送</span>
               </Cell>
               <Cell>{item.audience === "all" ? "全平台" : (item.recipientEmail ?? "指定用户")}</Cell>
-              <Cell>
-                <span className="block max-w-md whitespace-pre-wrap text-zinc-400">{item.body}</span>
-              </Cell>
               <Cell>{dateTime(item.createdAt)}</Cell>
             </tr>
           ))}
@@ -1242,7 +1239,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                             },
                           }))
                         }
-                        value={draft.hostname_suffix}
+                        value={draft.label || draft.hostname_suffix}
                       />
                       <FieldError />
                     </Cell>

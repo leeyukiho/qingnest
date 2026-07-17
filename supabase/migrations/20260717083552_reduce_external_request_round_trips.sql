@@ -133,6 +133,23 @@ begin
 end;
 $$;
 
+create or replace function public.acknowledge_all_user_notifications(p_user_id uuid)
+returns timestamptz
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare v_acknowledged_at timestamptz := now();
+begin
+  insert into public.notification_receipts (notification_id, user_id, acknowledged_at)
+  select n.id, p_user_id, v_acknowledged_at
+  from public.notifications n
+  where n.audience = 'all' or n.user_id = p_user_id
+  on conflict (notification_id, user_id) do update set acknowledged_at = excluded.acknowledged_at;
+  return v_acknowledged_at;
+end;
+$$;
+
 create or replace function public.increment_pages_deployment(
   p_month_start date,
   p_failed boolean default false
@@ -269,6 +286,7 @@ revoke execute on function public.get_admin_full_overview(uuid, timestamptz) fro
 grant execute on function public.get_account_snapshot(uuid, text, timestamptz) to service_role;
 grant execute on function public.get_user_notifications(uuid) to service_role;
 grant execute on function public.acknowledge_user_notification(uuid, uuid) to service_role;
+grant execute on function public.acknowledge_all_user_notifications(uuid) to service_role;
 grant execute on function public.increment_pages_deployment(date, boolean) to service_role;
 grant execute on function public.get_capacity_snapshot(date, date) to service_role;
 grant execute on function public.run_payment_maintenance(timestamptz) to service_role;
