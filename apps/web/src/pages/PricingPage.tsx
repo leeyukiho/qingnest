@@ -16,6 +16,29 @@ const capabilityRows: Array<{ label: string; key: keyof PublicPlan }> = [
   { label: "源码构建", key: "source_build" },
 ];
 
+const quotaRows: Array<{ label: string; value: (plan: PublicPlan) => string }> = [
+  { label: "免费平台域名", value: (plan) => `${plan.max_free_domains} 个` },
+  { label: "项目数量", value: (plan) => `${plan.max_sites} 个` },
+  { label: "公开项目", value: (plan) => `${plan.max_public_sites} 个` },
+  { label: "存储空间", value: (plan) => formatBytes(plan.max_storage_bytes) },
+  { label: "每日部署", value: (plan) => `${plan.max_deployments_per_day} 次` },
+  { label: "每小时上传", value: (plan) => `${plan.max_upload_sessions_per_hour} 次` },
+  { label: "单站点大小", value: (plan) => formatBytes(plan.max_site_bytes) },
+  { label: "每项目域名数", value: (plan) => `${plan.max_domains_per_site} 个` },
+  { label: "单次部署文件数", value: (plan) => `${plan.max_files.toLocaleString("zh-CN")} 个` },
+];
+
+function planHighlights(plan: PublicPlan) {
+  return [
+    `同时管理 ${plan.max_sites} 个站点，其中 ${plan.max_public_sites} 个可公开访问`,
+    `${formatBytes(plan.max_storage_bytes)} 总存储，单站最高 ${formatBytes(plan.max_site_bytes)}`,
+    `每天可部署 ${plan.max_deployments_per_day} 次，流量与带宽不限量`,
+    plan.max_free_domains > 0
+      ? `包含 ${plan.max_free_domains} 个免费平台域名`
+      : `每个站点可连接 ${plan.max_domains_per_site} 个域名`,
+  ];
+}
+
 const productTabs = [
   { key: "hosting", label: "站点托管", available: true },
   { key: "domains", label: "域名服务", available: false },
@@ -110,7 +133,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   return (
     <main className="min-h-dvh bg-black pb-20 pt-24 text-white">
       <header className={cn(CONTENT_TRACK_CLASS, "pb-8 pt-6 sm:pb-10 sm:pt-10")}>
-        <div className="max-w-2xl">
+        <div className="mx-auto max-w-2xl text-center">
           <h1 className="text-3xl font-semibold leading-tight tracking-normal text-white sm:text-4xl">套餐与价格</h1>
           <p className="mt-3 text-sm leading-6 text-zinc-400 sm:text-base">按当前需求选择，所有套餐均可随时升级。</p>
           {availableProductTabs.length > 1 ? (
@@ -144,15 +167,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
           <div className={`grid gap-px overflow-hidden rounded-md border border-white/15 bg-white/15 md:grid-cols-2 ${planGridClass}`}>
             {plans.map((plan) => {
               const recommended = plan.key === recommendedKey;
-              const benefits = [
-                `最多 ${plan.max_sites} 个站点`,
-                `其中 ${plan.max_public_sites} 个公开站点`,
-                `总存储 ${formatBytes(plan.max_storage_bytes)}`,
-                `单站容量 ${formatBytes(plan.max_site_bytes)}`,
-                `单次最多 ${plan.max_files.toLocaleString("zh-CN")} 个文件`,
-                `每天 ${plan.max_deployments_per_day} 次部署`,
-                `每站最多 ${plan.max_domains_per_site} 个域名`,
-              ];
+              const benefits = planHighlights(plan);
               return (
                 <article key={plan.key} className="flex min-h-[38rem] flex-col bg-black px-5 py-6 sm:px-6">
                   <div className="flex min-h-7 items-center justify-between gap-3">
@@ -163,19 +178,17 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
                   <PlanPrice plan={plan} />
                   {plan.monthly_price_cents === 0 && plan.renewal_price_cents === 0 ? <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 px-4 text-sm font-semibold" disabled={payingPlan !== null} onClick={() => onNavigate(startPath)} type="button">免费开始<ArrowRight className="h-4 w-4" /></button> : <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => session ? setCheckoutPlan(plan) : onNavigate(startPath)} type="button">购买套餐<ArrowRight className="h-4 w-4" /></button>}
                   <div className="mt-7 border-t border-white/10 pt-5">
-                    <p className="text-xs font-medium text-zinc-500">包含权益</p>
+                    <p className="text-xs font-medium text-zinc-500">核心权益</p>
                   </div>
                   <ul className="mt-2 divide-y divide-white/[0.07] text-sm text-zinc-300">
                     {benefits.map((benefit) => (
                       <li className="flex min-h-10 items-center gap-2.5 py-2" key={benefit}><Check className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" /><span>{benefit}</span></li>
                     ))}
-                    {capabilityRows.map((row) => {
-                      const included = Boolean(plan[row.key]);
+                    {capabilityRows.filter((row) => Boolean(plan[row.key])).map((row) => {
                       return (
-                        <li className={cn("flex min-h-10 items-center gap-2.5 py-2", !included && "text-zinc-600")} key={row.key}>
-                          {included ? <Check className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" /> : <Minus className="h-4 w-4 shrink-0 text-zinc-700" aria-hidden="true" />}
+                        <li className="flex min-h-10 items-center gap-2.5 py-2" key={row.key}>
+                          <Check className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" />
                           <span>{row.label}</span>
-                          {!included ? <span className="ml-auto text-xs text-zinc-700">未包含</span> : null}
                         </li>
                       );
                     })}
@@ -186,6 +199,59 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
           </div>
         ) : null}
       </section>
+
+      {!loading && !error && plans.length > 0 ? (
+        <section className={cn(CONTENT_TRACK_CLASS, "mt-14 sm:mt-20")} aria-labelledby="benefits-comparison-title">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="text-2xl font-semibold tracking-normal text-white" id="benefits-comparison-title">完整等级权益</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">价格之外，每一项资源配额和功能能力都清楚列出，选择时不必猜测。</p>
+          </div>
+          <div className="mt-6 overflow-x-auto border-y border-white/15">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead>
+                <tr className="border-b border-white/15">
+                  <th className="w-48 px-3 py-3 text-left font-medium text-zinc-500">权益项目</th>
+                  {plans.map((plan) => <th className="px-3 py-3 text-left font-semibold text-zinc-200" key={plan.key}>{plan.label}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-y border-white/15 bg-white/[0.025]">
+                  <td className="px-3 py-3 text-xs font-semibold text-zinc-500" colSpan={plans.length + 1}>资源配额</td>
+                </tr>
+                {quotaRows.map((row) => (
+                  <tr className="border-b border-white/10" key={row.label}>
+                    <th className="px-3 py-3 text-left font-normal text-zinc-400" scope="row">{row.label}</th>
+                    {plans.map((plan) => <td className="px-3 py-3 font-medium text-zinc-200 tabular-nums" key={plan.key}>{row.value(plan)}</td>)}
+                  </tr>
+                ))}
+                <tr className="border-b border-white/10">
+                  <th className="px-3 py-3 text-left font-normal text-zinc-400" scope="row">流量与带宽</th>
+                  {plans.map((plan) => <td className="px-3 py-3 font-medium text-zinc-200" key={plan.key}>不限量</td>)}
+                </tr>
+                <tr className="border-y border-white/15 bg-white/[0.025]">
+                  <td className="px-3 py-3 text-xs font-semibold text-zinc-500" colSpan={plans.length + 1}>功能能力</td>
+                </tr>
+                {capabilityRows.map((row) => (
+                  <tr className="border-b border-white/10" key={row.key}>
+                    <th className="px-3 py-3 text-left font-normal text-zinc-400" scope="row">{row.label}</th>
+                    {plans.map((plan) => {
+                      const included = Boolean(plan[row.key]);
+                      return (
+                        <td className={cn("px-3 py-3", included ? "text-zinc-200" : "text-zinc-600")} key={plan.key}>
+                          <span className="inline-flex items-center gap-2">
+                            {included ? <Check className="h-4 w-4" aria-hidden="true" /> : <Minus className="h-4 w-4" aria-hidden="true" />}
+                            {included ? "已包含" : "未包含"}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {checkoutPlan ? <div aria-labelledby="checkout-title" aria-modal="true" className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 sm:items-center sm:p-6" onMouseDown={(event) => { if (event.currentTarget === event.target && !payingPlan) setCheckoutPlan(null); }} role="dialog">
         <div className="w-full border border-white/15 bg-zinc-950 p-5 shadow-2xl sm:max-w-md sm:rounded-md sm:p-6">
