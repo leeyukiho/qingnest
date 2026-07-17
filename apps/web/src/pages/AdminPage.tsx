@@ -361,7 +361,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
               </>
             ) : null}
             {overview && tab === "domains" ? <DomainsPanel data={overview} domainForm={domainForm} priceDrafts={priceDrafts} setDomainForm={setDomainForm} setPriceDrafts={setPriceDrafts} usersById={usersById} confirm={confirm} changeStatus={changeStatus} /> : null}
-            {overview && tab === "orders" ? <OrdersPanel /> : null}
+            {overview && tab === "orders" ? <OrdersPanelV2 /> : null}
             {overview && tab === "plans" ? <PlansPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
             {overview && tab === "benefits" ? <BenefitsPanel plans={overview.plans} drafts={planDrafts} setDrafts={setPlanDrafts} confirm={confirm} /> : null}
             {overview && tab === "notifications" ? <NotificationsPanel users={overview.recentUsers} /> : null}
@@ -422,16 +422,16 @@ function OrdersPanel() {
       if (action === "reconcile") await reconcileAdminOrder(order.id);
       if (action === "retry") await retryAdminOrder(order.id);
       if (action === "replace") {
-        const hostname = window.prompt("输入同后缀的替换域名", order.product_name);
+        const hostname = "";
         if (!hostname) return;
         await replaceAdminOrderDomain(order.id, hostname);
       }
       if (action === "refund") {
-        const reason = window.prompt("输入退款原因");
+        const reason = "";
         if (!reason) return;
-        const reference = window.prompt("输入支付宝退款凭证号");
+        const reference = "";
         if (!reference) return;
-        await refundAdminOrder(order.id, reason, reference);
+        await refundAdminOrder(order.id, reason);
       }
       await load();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "订单操作失败"); }
@@ -440,6 +440,74 @@ function OrdersPanel() {
 
   if (loading && !orders.length) return <div className="mt-10 flex justify-center gap-2 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />正在读取支付订单</div>;
   return <div className="mt-5"><ToastMessage message={error} /><div className="mb-3 flex justify-end"><button className={STUDIO_SECONDARY_BUTTON_CLASS} disabled={loading} onClick={() => void load()} type="button"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />刷新订单</button></div><DataTable headers={["订单 / 商品", "用户", "金额", "状态", "时间", "操作"]}>{orders.map((order) => <tr className="border-b border-white/10 last:border-0" key={order.id}><Cell><span className="text-zinc-200">{order.product_name}</span><span className="block text-xs text-zinc-600">{order.order_no}</span>{order.failure_message ? <span className="mt-1 block max-w-72 text-xs text-amber-300">{order.failure_message}</span> : null}</Cell><Cell><span className="text-xs text-zinc-500">{order.user_id}</span></Cell><Cell>{money(order.amount_cents)}</Cell><Cell><StatusBadge status={order.status} /></Cell><Cell>{dateTime(order.created_at)}</Cell><Cell><div className="flex min-w-[15rem] flex-wrap gap-1"><button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "reconcile")} type="button">对账</button>{order.status === "fulfillment_failed" ? <><button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "retry")} type="button">重试交付</button>{order.type === "domain_rental" ? <button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "replace")} type="button">改派域名</button> : null}</> : null}{order.paid_at && order.status !== "refunded" ? <button className={dangerButton} disabled={busyId !== null} onClick={() => void run(order, "refund")} type="button">登记退款</button> : null}</div></Cell></tr>)}</DataTable></div>;
+}
+
+function OrdersPanelV2() {
+  const [orders, setOrders] = useState<AdminPaymentOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<{ order: AdminPaymentOrder; action: "replace" | "refund" } | null>(null);
+  const [formValue, setFormValue] = useState("");
+  const load = useCallback(async (force = false) => {
+    setLoading(true);
+    try { setOrders(await getAdminOrders(force)); setError(null); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "订单加载失败"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const run = async (order: AdminPaymentOrder, action: "reconcile" | "retry" | "replace" | "refund", value = "") => {
+    setBusyId(order.id);
+    setError(null);
+    try {
+      if (action === "reconcile") await reconcileAdminOrder(order.id);
+      if (action === "retry") await retryAdminOrder(order.id);
+      if (action === "replace") await replaceAdminOrderDomain(order.id, value);
+      if (action === "refund") await refundAdminOrder(order.id, value);
+      setDialog(null);
+      setFormValue("");
+      await load(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "订单操作失败"); }
+    finally { setBusyId(null); }
+  };
+  const openDialog = (order: AdminPaymentOrder, action: "replace" | "refund") => {
+    setDialog({ order, action });
+    setFormValue(action === "replace" ? order.product_name : "");
+  };
+
+  if (loading && !orders.length) return <div className="mt-10 flex justify-center gap-2 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />正在读取支付订单</div>;
+  return (
+    <div className="mt-5">
+      <ToastMessage message={error} />
+      <div className="mb-3 flex justify-end"><button className={STUDIO_SECONDARY_BUTTON_CLASS} disabled={loading} onClick={() => void load(true)} type="button"><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />刷新订单</button></div>
+      <DataTable headers={["订单 / 商品", "用户", "金额", "状态", "时间", "操作"]}>
+        {orders.map((order) => {
+          const successful = ["paid", "fulfilling", "fulfilled"].includes(order.status);
+          return (
+            <tr className={cn("border-b border-white/10 last:border-0", successful && "bg-emerald-500/[0.06]")} key={order.id}>
+              <Cell><span className={cn("text-zinc-200", successful && "font-medium text-emerald-200")}>{order.product_name}</span><span className="block text-xs text-zinc-600">{order.order_no}</span>{order.failure_message ? <span className="mt-1 block max-w-72 text-xs text-amber-300">{order.failure_message}</span> : null}</Cell>
+              <Cell><span className="text-sm text-zinc-300">{order.user_email ?? "未知邮箱"}</span></Cell>
+              <Cell><span className={cn(successful && "font-semibold text-emerald-300")}>{money(order.actual_amount_cents ?? order.amount_cents)}</span></Cell>
+              <Cell><StatusBadge status={order.status} /></Cell>
+              <Cell>{dateTime(order.created_at)}</Cell>
+              <Cell><div className="flex min-w-[15rem] flex-wrap gap-1"><button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "reconcile")} type="button">对账</button>{order.status === "fulfillment_failed" ? <><button className={quietButton} disabled={busyId !== null} onClick={() => void run(order, "retry")} type="button">重试交付</button>{order.type === "domain_rental" ? <button className={quietButton} disabled={busyId !== null} onClick={() => openDialog(order, "replace")} type="button">改派域名</button> : null}</> : null}{order.paid_at && order.status !== "refunded" ? <button className={dangerButton} disabled={busyId !== null} onClick={() => openDialog(order, "refund")} type="button">退款至余额</button> : null}</div></Cell>
+            </tr>
+          );
+        })}
+      </DataTable>
+      {dialog ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !busyId) setDialog(null); }}>
+          <div aria-modal="true" className="w-full max-w-md rounded-md border border-white/20 bg-zinc-950 p-5 shadow-2xl" role="dialog">
+            <div className="flex items-start justify-between gap-4"><div><h2 className="text-base font-semibold text-white">{dialog.action === "refund" ? "退款至用户余额" : "改派域名"}</h2><p className="mt-2 text-sm leading-6 text-zinc-400">{dialog.action === "refund" ? `${dialog.order.user_email ?? "该用户"} 将收到 ${money(dialog.order.actual_amount_cents ?? dialog.order.amount_cents)} 到站内余额。` : "请输入与原订单后缀一致的新域名。"}</p></div><button aria-label="关闭" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-white/10 hover:text-white" disabled={Boolean(busyId)} onClick={() => setDialog(null)} type="button"><X className="h-4 w-4" /></button></div>
+            <label className="mt-5 grid gap-2 text-sm text-zinc-300">{dialog.action === "refund" ? "退款原因" : "替换域名"}<textarea autoFocus className={cn(fieldClass, "h-24 resize-none py-3")} disabled={Boolean(busyId)} maxLength={dialog.action === "refund" ? 500 : 253} onChange={(event) => setFormValue(event.target.value)} value={formValue} /></label>
+            {error ? <p className="mt-3 text-sm text-red-300" role="alert">{error}</p> : null}
+            <div className="mt-6 flex justify-end gap-2"><button className={quietButton} disabled={Boolean(busyId)} onClick={() => setDialog(null)} type="button">取消</button><button className={dialog.action === "refund" ? dangerButton : saveButton} disabled={Boolean(busyId) || !formValue.trim()} onClick={() => void run(dialog.order, dialog.action, formValue.trim())} type="button">{busyId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{dialog.action === "refund" ? "确认退款" : "确认改派"}</button></div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function Overview({ data }: { data: AdminOverview }) {
@@ -452,6 +520,7 @@ function Overview({ data }: { data: AdminOverview }) {
     ["待审核", data.pendingReviewSites],
     ["已封禁", data.blockedSites],
   ];
+  stats.push(["交易总金额", money(data.successfulTransactionAmountCents)]);
   return (
     <div className="mt-5 grid gap-x-8 gap-y-6 border-y border-white/15 py-5 sm:grid-cols-2 xl:grid-cols-4">
       {stats.map(([label, value]) => (

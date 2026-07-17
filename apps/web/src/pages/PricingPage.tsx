@@ -27,26 +27,19 @@ function money(cents: number) {
 }
 
 function PlanPrice({ plan }: { plan: PublicPlan }) {
-  const isFree = plan.renewal_price_cents === 0;
-  const saving = plan.monthly_price_cents > plan.renewal_price_cents
-    ? Math.round((1 - plan.renewal_price_cents / plan.monthly_price_cents) * 100)
-    : 0;
+  const isFree = plan.monthly_price_cents === 0 && plan.renewal_price_cents === 0;
 
   return (
-    <div className="mt-6 min-h-24">
-      <div className="flex items-baseline gap-1.5">
+    <div className="mt-6 min-h-28">
+      <p className="text-xs font-medium text-zinc-500">首次购买</p>
+      <div className="mt-2 flex items-baseline gap-1.5">
         <span className="text-sm font-medium text-zinc-500">¥</span>
-        <span className="text-4xl font-semibold leading-none tracking-normal text-white tabular-nums">{money(plan.renewal_price_cents)}</span>
+        <span className="text-4xl font-semibold leading-none tracking-normal text-white tabular-nums">{money(plan.monthly_price_cents)}</span>
         <span className="text-sm text-zinc-500">/ 月</span>
       </div>
-      {isFree ? (
-        <p className="mt-3 text-xs leading-5 text-zinc-500">永久免费，无需绑定支付方式</p>
-      ) : (
-        <p className="mt-3 text-xs leading-5 text-zinc-500">
-          续费价格{saving ? `，相比月付节省 ${saving}%` : ""}
-          {saving ? <span className="ml-1 text-zinc-600">· 月付 ¥{money(plan.monthly_price_cents)}</span> : null}
-        </p>
-      )}
+      <div className="mt-4 flex min-h-8 items-center gap-2 border-t border-white/10 pt-3">
+        {isFree ? <span className="text-xs font-medium leading-5 text-zinc-500">永久免费，无需绑定支付方式</span> : <><span className="text-xs font-medium text-zinc-500">续费价格</span><span className="text-lg font-semibold leading-6 text-zinc-200 tabular-nums">¥{money(plan.renewal_price_cents)}</span><span className="text-xs text-zinc-600">/ 月</span></>}
+      </div>
     </div>
   );
 }
@@ -76,7 +69,8 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
     return () => { active = false; };
   }, []);
 
-  const recommendedKey = useMemo(() => plans.find((plan) => plan.key === "pro")?.key ?? plans.find((plan) => plan.renewal_price_cents > 0)?.key, [plans]);
+  const recommendedKey = useMemo(() => plans.find((plan) => plan.key === "pro")?.key ?? plans.find((plan) => plan.monthly_price_cents > 0)?.key, [plans]);
+  const planGridClass = plans.length === 3 ? "xl:grid-cols-3 xl:max-w-5xl xl:mx-auto" : plans.length >= 4 ? "xl:grid-cols-4" : "xl:grid-cols-2 xl:max-w-3xl xl:mx-auto";
   const availableProductTabs = productTabs.filter((tab) => tab.available);
   const startPath = session ? STUDIO_BILLING_PATH : "/auth?mode=sign_up";
 
@@ -145,8 +139,9 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
       <section className={CONTENT_TRACK_CLASS} aria-label="套餐列表">
         {loading ? <div className="flex min-h-72 items-center justify-center gap-3 text-zinc-400"><LoaderCircle className="h-5 w-5 animate-spin" />正在读取套餐</div> : null}
         {error ? <p className="border-b border-red-400/30 py-10 text-red-300" role="alert">{error}</p> : null}
-        {!loading && !error ? (
-          <div className="grid gap-px overflow-hidden rounded-md border border-white/15 bg-white/15 md:grid-cols-2 xl:grid-cols-4">
+        {!loading && !error && plans.length === 0 ? <p className="border-b border-white/10 py-10 text-sm text-zinc-500">当前暂无可购买套餐。</p> : null}
+        {!loading && !error && plans.length > 0 ? (
+          <div className={`grid gap-px overflow-hidden rounded-md border border-white/15 bg-white/15 md:grid-cols-2 ${planGridClass}`}>
             {plans.map((plan) => {
               const recommended = plan.key === recommendedKey;
               const benefits = [
@@ -166,7 +161,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
                   </div>
                   <h2 className="mt-3 text-xl font-semibold tracking-normal text-white">{plan.label}</h2>
                   <PlanPrice plan={plan} />
-                  {plan.renewal_price_cents === 0 ? <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 px-4 text-sm font-semibold" disabled={payingPlan !== null} onClick={() => onNavigate(startPath)} type="button">免费开始<ArrowRight className="h-4 w-4" /></button> : <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => session ? setCheckoutPlan(plan) : onNavigate(startPath)} type="button">购买套餐<ArrowRight className="h-4 w-4" /></button>}
+                  {plan.monthly_price_cents === 0 && plan.renewal_price_cents === 0 ? <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 px-4 text-sm font-semibold" disabled={payingPlan !== null} onClick={() => onNavigate(startPath)} type="button">免费开始<ArrowRight className="h-4 w-4" /></button> : <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => session ? setCheckoutPlan(plan) : onNavigate(startPath)} type="button">购买套餐<ArrowRight className="h-4 w-4" /></button>}
                   <div className="mt-7 border-t border-white/10 pt-5">
                     <p className="text-xs font-medium text-zinc-500">包含权益</p>
                   </div>
@@ -194,7 +189,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
 
       {checkoutPlan ? <div aria-labelledby="checkout-title" aria-modal="true" className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 sm:items-center sm:p-6" onMouseDown={(event) => { if (event.currentTarget === event.target && !payingPlan) setCheckoutPlan(null); }} role="dialog">
         <div className="w-full border border-white/15 bg-zinc-950 p-5 shadow-2xl sm:max-w-md sm:rounded-md sm:p-6">
-          <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-white" id="checkout-title">选择支付方式</h2><p className="mt-1 text-sm text-zinc-500">{checkoutPlan.label} · ¥{money(checkoutPlan.renewal_price_cents)} / 月</p></div><button aria-label="关闭" className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40" disabled={payingPlan !== null} onClick={() => setCheckoutPlan(null)} type="button"><X className="h-4 w-4" /></button></div>
+          <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-white" id="checkout-title">选择支付方式</h2><p className="mt-1 text-sm text-zinc-500">{checkoutPlan.label} · 首购 ¥{money(checkoutPlan.monthly_price_cents)} / 月 · 续费 ¥{money(checkoutPlan.renewal_price_cents)} / 月</p></div><button aria-label="关闭" className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40" disabled={payingPlan !== null} onClick={() => setCheckoutPlan(null)} type="button"><X className="h-4 w-4" /></button></div>
           <div className="mt-5 grid gap-2">
             <button autoFocus className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "wallet")} type="button"><WalletCards className="h-5 w-5 shrink-0 text-emerald-400" /><span><span className="block text-sm font-semibold text-white">账户余额</span><span className="mt-1 block text-xs text-zinc-500">余额不足时可前往钱包充值</span></span>{payingPlan === checkoutPlan.key && payingMethod === "wallet" ? <LoaderCircle className="ml-auto h-4 w-4 animate-spin" /> : <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />}</button>
             <button className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "alipay")} type="button"><CreditCard className="h-5 w-5 shrink-0 text-sky-400" /><span><span className="block text-sm font-semibold text-white">支付宝</span><span className="mt-1 block text-xs text-zinc-500">创建订单后前往支付宝完成付款</span></span>{payingPlan === checkoutPlan.key && payingMethod === "alipay" ? <LoaderCircle className="ml-auto h-4 w-4 animate-spin" /> : <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />}</button>

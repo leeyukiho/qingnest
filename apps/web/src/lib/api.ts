@@ -238,6 +238,7 @@ export type AdminOverview = {
   deployments: number;
   domains: number;
   blockedSites: number;
+  successfulTransactionAmountCents: number;
   storageBytes: number;
   recentUsers: Array<{ id: string; email: string; role: AccountRole; plan: string; createdAt: string }>;
   recentSites: Array<{ id: string; name: string; ownerEmail: string; status: "draft" | "active" | "pending_review" | "blocked" | "deleted"; createdAt: string; updatedAt: string }>;
@@ -254,7 +255,7 @@ export type AdminDomainPrice = { domain_type: string; label: string; hostname_su
 export type PaymentOrder = { id: string; orderNo: string; type: "plan_subscription" | "domain_rental" | "domain_renewal" | "wallet_topup"; status: "pending" | "payment_failed" | "paid" | "fulfilling" | "fulfilled" | "fulfillment_failed" | "expired" | "refund_pending" | "refunded" | "cancelled"; amountCents: number; actualAmountCents: number | null; productName: string; productSnapshot: unknown; expiresAt: string; paidAt: string | null; fulfilledAt: string | null; failureMessage: string | null; payUrl: string | null; createdAt: string };
 export type WalletSummary = { balanceCents: number; ledger: Array<{ id: string; amount_cents: number; balance_after_cents: number; kind: "topup" | "domain_purchase" | "domain_renewal" | "plan_purchase" | "admin_adjustment"; description: string; created_at: string }> };
 export type CheckoutResult = { orderId: string; orderNo: string; payUrl: string; expiresAt: string };
-export type AdminPaymentOrder = { id: string; order_no: string; user_id: string; type: PaymentOrder["type"]; status: PaymentOrder["status"]; amount_cents: number; product_name: string; product_snapshot: unknown; provider_order_id: string | null; expires_at: string; paid_at: string | null; fulfilled_at: string | null; failure_message: string | null; created_at: string; updated_at: string };
+export type AdminPaymentOrder = { id: string; order_no: string; user_id: string; user_email: string | null; type: PaymentOrder["type"]; status: PaymentOrder["status"]; amount_cents: number; actual_amount_cents: number | null; product_name: string; product_snapshot: unknown; provider_order_id: string | null; expires_at: string; paid_at: string | null; fulfilled_at: string | null; failure_message: string | null; created_at: string; updated_at: string };
 export type NotificationItem = { id: string; title: string; body: string; audience: "all" | "user"; acknowledgedAt: string | null; createdAt: string };
 export type AdminNotification = NotificationItem & { recipientEmail: string | null; createdByEmail: string };
 export type CapacityMetricKey = "workerRequests" | "kvReads" | "kvWrites" | "r2StorageBytes" | "r2ClassA" | "r2ClassB" | "pagesDeployments" | "pagesProjects" | "resendEmailsDaily" | "resendEmailsMonthly";
@@ -263,12 +264,15 @@ export type CapacityThresholds = Record<CapacityMetricKey, { warningPercent: num
 export type CapacityDashboard = { settings: { stage: "free" | "workers_paid" | "workers_paid_stable" | "pages_pro"; resendPlan: ResendPlan; limits: Record<CapacityMetricKey, number>; thresholds: CapacityThresholds; notificationCooldownHours: number; updatedAt: string }; observed: Record<CapacityMetricKey, number>; acceleratedSites: number; sampledAt: string; providerSample: { available: boolean; sampledAt: string | null; error: string | null; intervalHours: number; includesAdminTraffic: boolean }; scopeNote: string; presets: Record<string, { label: string; limits: Record<CapacityMetricKey, number>; thresholds: CapacityThresholds }>; resendPresets: Record<ResendPlan, { label: string; limits: Pick<Record<CapacityMetricKey, number>, "resendEmailsDaily" | "resendEmailsMonthly"> }> };
 
 const ADMIN_OVERVIEW_CACHE_MS = 5 * 60_000;
+const ADMIN_ORDERS_CACHE_MS = 60_000;
 const CAPACITY_CACHE_MS = 2 * 60 * 60_000;
 const NOTIFICATIONS_CACHE_MS = 5 * 60_000;
 const PUBLIC_PLANS_CACHE_MS = 6 * 60 * 60_000;
 const PUBLIC_PLANS_CACHE_KEY = "kuaipage:public-plans:v1";
 let adminOverviewCache: { data: AdminOverview; expiresAt: number } | null = null;
 let adminOverviewRequest: Promise<AdminOverview> | null = null;
+let adminOrdersCache: { data: AdminPaymentOrder[]; expiresAt: number } | null = null;
+let adminOrdersRequest: Promise<AdminPaymentOrder[]> | null = null;
 let capacityCache: { data: CapacityDashboard; expiresAt: number } | null = null;
 let capacityRequest: Promise<CapacityDashboard> | null = null;
 let notificationsCache: { data: NotificationItem[]; expiresAt: number } | null = null;
@@ -362,11 +366,21 @@ export const updateAdminDomainPrice = (type: AdminDomainPrice["domain_type"], in
 export const createAdminDomainPrice = (input: Pick<AdminDomainPrice, "domain_type" | "label" | "hostname_suffix" | "price_cents" | "billing_period" | "monthly_price_cents" | "quarterly_price_cents" | "semiannual_price_cents" | "annual_price_cents" | "renewal_window_days" | "max_advance_months" | "enabled">) => adminMutation<AdminDomainPrice>("/api/admin/domain-pricing", "POST", input);
 export const deleteAdminDomainPrice = (type: string) => adminMutation(`/api/admin/domain-pricing/${encodeURIComponent(type)}`, "DELETE");
 export const syncAdminDomainPrice = (type: string) => adminMutation<AdminDomainPrice>(`/api/admin/domain-pricing/${encodeURIComponent(type)}/sync`, "POST");
-export const getAdminOrders = () => request<AdminPaymentOrder[]>("/api/admin/orders");
-export const reconcileAdminOrder = (id: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/reconcile`, { method: "POST", body: "{}" });
-export const retryAdminOrder = (id: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/retry`, { method: "POST", body: "{}" });
-export const replaceAdminOrderDomain = (id: string, hostname: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/replace-domain`, { method: "POST", body: JSON.stringify({ hostname }) });
-export const refundAdminOrder = (id: string, reason: string, channelReference: string) => request(`/api/admin/orders/${encodeURIComponent(id)}/refund`, { method: "POST", body: JSON.stringify({ reason, channelReference }) });
+export async function getAdminOrders(force = false) {
+  if (!force && adminOrdersCache && adminOrdersCache.expiresAt > Date.now()) return adminOrdersCache.data;
+  if (!force && adminOrdersRequest) return adminOrdersRequest;
+  const pending = request<AdminPaymentOrder[]>("/api/admin/orders").then((data) => {
+    adminOrdersCache = { data, expiresAt: Date.now() + ADMIN_ORDERS_CACHE_MS };
+    return data;
+  });
+  adminOrdersRequest = pending;
+  try { return await pending; } finally { if (adminOrdersRequest === pending) adminOrdersRequest = null; }
+}
+function invalidateAdminOrders() { adminOrdersCache = null; }
+export const reconcileAdminOrder = async (id: string) => { const result = await request(`/api/admin/orders/${encodeURIComponent(id)}/reconcile`, { method: "POST", body: "{}" }); invalidateAdminOrders(); return result; };
+export const retryAdminOrder = async (id: string) => { const result = await request(`/api/admin/orders/${encodeURIComponent(id)}/retry`, { method: "POST", body: "{}" }); invalidateAdminOrders(); return result; };
+export const replaceAdminOrderDomain = async (id: string, hostname: string) => { const result = await request(`/api/admin/orders/${encodeURIComponent(id)}/replace-domain`, { method: "POST", body: JSON.stringify({ hostname }) }); invalidateAdminOrders(); return result; };
+export const refundAdminOrder = async (id: string, reason: string) => { const result = await request(`/api/admin/orders/${encodeURIComponent(id)}/refund`, { method: "POST", body: JSON.stringify({ reason }) }); invalidateAdminOrders(); return result; };
 export async function getNotifications(force = false) {
   if (!force && notificationsCache && notificationsCache.expiresAt > Date.now()) {
     return notificationsCache.data;

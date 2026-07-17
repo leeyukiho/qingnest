@@ -479,9 +479,16 @@ export async function reconcileOrder(env: Env, orderId: string) {
 }
 
 export async function listAdminOrders(env: Env) {
-  const { data, error } = await createServiceSupabase(env).from("orders").select("*").order("created_at", { ascending: false }).limit(300);
+  const supabase = createServiceSupabase(env);
+  const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(300);
   if (error) throw new Error(error.message);
-  return data ?? [];
+  const userIds = [...new Set((data ?? []).map((order) => order.user_id))];
+  const { data: profiles, error: profileError } = userIds.length
+    ? await supabase.from("profiles").select("id, email").in("id", userIds)
+    : { data: [], error: null };
+  if (profileError) throw new Error(profileError.message);
+  const emails = new Map((profiles ?? []).map((profile) => [profile.id, profile.email]));
+  return (data ?? []).map((order) => ({ ...order, user_email: emails.get(order.user_id) ?? null }));
 }
 
 export async function retryOrderFulfillment(env: Env, orderId: string) {

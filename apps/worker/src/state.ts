@@ -145,6 +145,7 @@ export type AdminOverview = {
   deployments: number;
   domains: number;
   blockedSites: number;
+  successfulTransactionAmountCents: number;
   storageBytes: number;
   recentUsers: Array<{
     id: string;

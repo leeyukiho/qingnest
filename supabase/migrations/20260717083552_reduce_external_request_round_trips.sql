@@ -249,6 +249,7 @@ set search_path = public, pg_temp
 as $$
   select public.get_admin_overview(p_admin_id) || jsonb_build_object(
     'todayUsers', (select count(*) from public.profiles where created_at >= p_today_start),
+    'successfulTransactionAmountCents', coalesce((select sum(coalesce(actual_amount_cents, amount_cents)) from public.payments where status = 'success'), 0),
     'domainsList', coalesce((
       select jsonb_agg(jsonb_build_object(
         'id', d.id,
