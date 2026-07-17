@@ -61,7 +61,7 @@ import {
 } from "@/lib/archive";
 import { cn } from "@/lib/utils";
 import { ToastMessage, useToast } from "@/app/toast";
-import { STUDIO_PROJECTS_PATH } from "@/app/navigation";
+import { STUDIO_DOMAINS_PATH, STUDIO_PROJECTS_PATH } from "@/app/navigation";
 
 type Tab = "overview" | "versions" | "publishing" | "settings";
 type PreparedProjectDeployment = Awaited<
@@ -105,6 +105,9 @@ export function ProjectDetailPage({
   const [showBindReminder, setShowBindReminder] = useState(false);
   const [subdomain, setSubdomain] = useState("");
   const [publishingBusy, setPublishingBusy] = useState(false);
+  const freeDomainLimit = account?.planConfig?.quotas.user.maxFreeDomains ?? 0;
+  const freeDomainsUsed = account?.usage.freeDomains ?? 0;
+  const freeDomainsRemaining = Math.max(0, freeDomainLimit - freeDomainsUsed);
   const [confirmAction, setConfirmAction] = useState<
     { type: "bind" | "unbind"; slot: PublicSlot } | { type: "delete" } | null
   >(null);
@@ -592,6 +595,14 @@ export function ProjectDetailPage({
                       className="mt-6 border-t border-white/10 pt-5"
                       onSubmit={createAndBindSlot}
                     >
+                      <div className="mb-4 rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-medium text-zinc-200">{account?.planConfig?.label ?? "当前套餐"} 的公开权益</span>
+                          <span className="text-zinc-400">公开项目 {slots.length} / {plan.quotas.user.maxPublicSites}</span>
+                        </div>
+                        <p className="mt-2 leading-6 text-zinc-500">套餐免费域名已使用 {freeDomainsUsed} / {freeDomainLimit} 个，剩余 {freeDomainsRemaining} 个。套餐赠送域名长期有效；其他平台域名按租期计费，到期后需要续费。</p>
+                        <button className="mt-2 inline-flex items-center gap-1 text-sm text-zinc-200 underline underline-offset-4 hover:text-white" onClick={() => onNavigate(STUDIO_DOMAINS_PATH)} type="button">购买或领取平台域名 <ExternalLink className="h-3.5 w-3.5" /></button>
+                      </div>
                       <label className="grid gap-2 text-sm font-medium text-zinc-300">
                         创建新的公开地址
                         <div className="grid grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border border-white/20 focus-within:border-white/50">

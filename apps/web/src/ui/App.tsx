@@ -77,7 +77,7 @@ export function App() {
   const isProtectedRoute = isStudioPathname(pathname) || isLegacyProtectedRoute;
   const authMode = useMemo(() => getAuthMode(location.search), [location.search]);
   const authStatus = useMemo(() => getAuthStatus(location.search), [location.search]);
-  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_WALLET_PATH ? "wallet" : pathname === STUDIO_ORDERS_PATH || pathname === STUDIO_PAYMENT_RESULT_PATH ? "orders" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_MY_DOMAINS_PATH ? "domain-management" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
+  const studioActive = pathname === STUDIO_ADMIN_PATH ? "admin" : pathname === STUDIO_NOTIFICATIONS_PATH ? "notifications" : pathname === STUDIO_PROFILE_PATH ? "profile" : pathname === STUDIO_WALLET_PATH ? "wallet" : pathname === STUDIO_ORDERS_PATH || pathname.startsWith(`${STUDIO_ORDERS_PATH}/`) || pathname === STUDIO_PAYMENT_RESULT_PATH ? "orders" : pathname === STUDIO_BILLING_PATH ? "billing" : pathname === STUDIO_MY_DOMAINS_PATH ? "domain-management" : pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH ? "domains" : pathname.startsWith(STUDIO_PROJECTS_PATH) ? "projects" : "create";
   const matchingCachedAccount = session && cachedSidebarAccount?.id === session.user.id ? cachedSidebarAccount : null;
   const silentGateAccount = account ?? matchingCachedAccount ?? (session ? {
     id: session.user.id,
@@ -88,7 +88,7 @@ export function App() {
     subscriptionExpiresAt: null,
     walletBalanceCents: 0,
     createdAt: session.user.created_at ?? new Date().toISOString(),
-    usage: { sites: 0, publicSites: 0, storageBytes: 0, deploymentsToday: 0 }
+    usage: { sites: 0, publicSites: 0, freeDomains: 0, storageBytes: 0, deploymentsToday: 0 }
   } : null);
 
   useEffect(() => {
@@ -270,7 +270,7 @@ export function App() {
           subscriptionExpiresAt: null,
           walletBalanceCents: 0,
           createdAt: session.user.created_at ?? new Date().toISOString(),
-          usage: { sites: 0, publicSites: 0, storageBytes: 0, deploymentsToday: 0 }
+          usage: { sites: 0, publicSites: 0, freeDomains: 0, storageBytes: 0, deploymentsToday: 0 }
         });
       });
 
@@ -358,8 +358,9 @@ export function App() {
     routeContent = <ProjectsPage account={account} authReady={authReady} onNavigate={navigate} session={session} />;
   } else if (pathname === STUDIO_DOMAINS_PATH || pathname === STUDIO_DOMAIN_PURCHASE_PATH) {
     routeContent = <DomainPurchasePage account={account} onNavigate={navigate} />;
-  } else if (pathname === STUDIO_WALLET_PATH || pathname === STUDIO_BILLING_PATH || pathname === STUDIO_ORDERS_PATH) {
-    routeContent = <BillingPage account={account} onNavigate={navigate} section={pathname === STUDIO_WALLET_PATH ? "wallet" : pathname === STUDIO_ORDERS_PATH ? "orders" : "plan"} />;
+  } else if (pathname === STUDIO_WALLET_PATH || pathname === STUDIO_BILLING_PATH || pathname === STUDIO_ORDERS_PATH || pathname.startsWith(`${STUDIO_ORDERS_PATH}/`)) {
+    const orderId = pathname.startsWith(`${STUDIO_ORDERS_PATH}/`) ? decodeURIComponent(pathname.slice(STUDIO_ORDERS_PATH.length + 1)) : undefined;
+    routeContent = <BillingPage account={account} onNavigate={navigate} orderId={orderId} section={pathname === STUDIO_WALLET_PATH ? "wallet" : orderId ? "order-detail" : pathname === STUDIO_ORDERS_PATH ? "orders" : "plan"} />;
   } else if (pathname === STUDIO_PAYMENT_RESULT_PATH) {
     routeContent = <PaymentResultPage account={account} onNavigate={navigate} search={location.search} />;
   } else if (pathname === STUDIO_MY_DOMAINS_PATH) {

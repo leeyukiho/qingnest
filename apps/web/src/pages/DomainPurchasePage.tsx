@@ -56,13 +56,18 @@ export function DomainPurchasePage({
   const [domainQuery, setDomainQuery] = useState("");
   const [suffixFilter, setSuffixFilter] = useState("all");
   const [durationMonths, setDurationMonths] = useState<1 | 3 | 6 | 12>(12);
-  const [purchaseMode, setPurchaseMode] = useState<"free" | "paid">("free");
+  const [purchaseMode, setPurchaseMode] = useState<"free" | "paid">("paid");
+  const freeDomainLimit = account?.planConfig?.quotas.user.maxFreeDomains ?? 0;
+  const freeDomainsRemaining = Math.max(
+    0,
+    freeDomainLimit - (account?.usage.freeDomains ?? 0),
+  );
+  const hasFreeDomainQuota = freeDomainsRemaining > 0;
   useEffect(() => {
     void getPlatformDomainCatalog().then((items) => {
       if (!items.length) return;
       setDomainOptions(items);
       setSelectedSuffix(items[0].hostname_suffix);
-      setPurchaseMode(items[0].free_claim_enabled ? "free" : "paid");
     }).catch(() => setDomainOptions([]));
   }, []);
   const localValidation = prefix.trim()
@@ -72,7 +77,12 @@ export function DomainPurchasePage({
     ? domainOptions
     : [{ domain_type: "platform_subdomain", label: domainRoot, hostname_suffix: domainRoot, price_cents: 990, billing_period: "year" as const, monthly_price_cents: 99, quarterly_price_cents: 279, semiannual_price_cents: 529, annual_price_cents: 990, enabled: true, free_claim_enabled: true }];
   const selectedOption = availableOptions.find((option) => option.hostname_suffix === selectedSuffix) ?? availableOptions[0];
-  const isFreeClaim = selectedOption.free_claim_enabled && purchaseMode === "free";
+  const canClaimSelectedForFree =
+    hasFreeDomainQuota && selectedOption.free_claim_enabled;
+  const isFreeClaim = canClaimSelectedForFree && purchaseMode === "free";
+  useEffect(() => {
+    setPurchaseMode(canClaimSelectedForFree ? "free" : "paid");
+  }, [canClaimSelectedForFree, selectedSuffix]);
   const selectedDuration = durationOptions.find((option) => option.months === durationMonths)!;
   const selectedPrice = selectedOption[selectedDuration.priceKey];
   const suffixes = useMemo(
@@ -154,6 +164,20 @@ export function DomainPurchasePage({
                   </div>
                 </div>
 
+                {hasFreeDomainQuota ? (
+                  <div className="mt-5 flex items-start gap-3 rounded-md border border-emerald-400/25 bg-emerald-400/[0.06] p-4">
+                    <Gift className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-emerald-100">
+                        当前套餐还有 {freeDomainsRemaining} 个免费域名额度
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-emerald-200/60">
+                        选择标有“可免费领取”的域名后，可直接使用额度，无需支付。
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="mt-6 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label className="flex h-10 items-center gap-2 rounded-md border border-white/15 px-3 focus-within:border-white/35">
                     <Search className="h-4 w-4 shrink-0 text-zinc-500" />
@@ -168,16 +192,16 @@ export function DomainPurchasePage({
                 {filteredOptions.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {filteredOptions.map((option) => {
                     const selected = selectedSuffix === option.hostname_suffix;
-                    return <button aria-pressed={selected} className={`flex min-h-20 cursor-pointer items-center justify-between rounded-md border p-4 text-left transition-colors ${selected ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.domain_type} onClick={() => { setSelectedSuffix(option.hostname_suffix); setPurchaseMode(option.free_claim_enabled ? "free" : "paid"); setCheck(null); }} type="button"><span><span className="block text-sm font-semibold text-zinc-100">{displayHostname(option.hostname_suffix)}</span><span className="mt-1 block text-xs text-zinc-500">{option.free_claim_enabled ? "套餐可免费领取" : `¥${(option.monthly_price_cents / 100).toFixed(2)} 起`}</span></span>{selected ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : null}</button>;
+                    return <button aria-pressed={selected} className={`flex min-h-20 cursor-pointer items-center justify-between rounded-md border p-4 text-left transition-colors ${selected ? "border-emerald-400/50 bg-emerald-400/[0.06]" : "border-white/15 hover:border-white/30"}`} key={option.domain_type} onClick={() => { setSelectedSuffix(option.hostname_suffix); setPurchaseMode(option.free_claim_enabled && hasFreeDomainQuota ? "free" : "paid"); setCheck(null); }} type="button"><span><span className="block text-sm font-semibold text-zinc-100">{displayHostname(option.hostname_suffix)}</span><span className="mt-1 block text-xs text-zinc-500">{option.free_claim_enabled && hasFreeDomainQuota ? "可免费领取" : `¥${(option.monthly_price_cents / 100).toFixed(2)} 起`}</span></span>{selected ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" /> : null}</button>;
                   })}
                 </div> : <div className="mt-3 rounded-md border border-dashed border-white/15 px-4 py-8 text-center text-sm text-zinc-500">没有符合条件的平台域名</div>}
 
-                {selectedOption.free_claim_enabled ? <div className="mt-6 grid grid-cols-2 rounded-md border border-white/15 p-1" role="group" aria-label="购买方式">
+                {canClaimSelectedForFree ? <div className="mt-6 grid grid-cols-2 rounded-md border border-white/15 p-1" role="group" aria-label="购买方式">
                   <button aria-pressed={purchaseMode === "free"} className={`h-9 rounded text-sm ${purchaseMode === "free" ? "bg-white text-black" : "text-zinc-400"}`} onClick={() => setPurchaseMode("free")} type="button">套餐免费</button>
                   <button aria-pressed={purchaseMode === "paid"} className={`h-9 rounded text-sm ${purchaseMode === "paid" ? "bg-white text-black" : "text-zinc-400"}`} onClick={() => setPurchaseMode("paid")} type="button">单独租赁</button>
                 </div> : null}
 
-                {!isFreeClaim ? <div className="mt-6">
+                <div className="mt-6">
                   <label className="text-sm font-medium text-zinc-200" htmlFor="domain-prefix">
                     地址前缀
                   </label>
@@ -233,9 +257,9 @@ export function DomainPurchasePage({
                       )}
                     </div>
                   </div>
-                </div> : null}
+                </div>
 
-                <div className="mt-6">
+                {!isFreeClaim ? <div className="mt-6">
                   <p className="text-sm font-medium text-zinc-200">租赁时长</p>
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {durationOptions.map((option) => (
@@ -245,7 +269,7 @@ export function DomainPurchasePage({
                       </button>
                     ))}
                   </div>
-                </div>
+                </div> : null}
               </div>
 
               <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}>

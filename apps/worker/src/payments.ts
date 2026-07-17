@@ -208,6 +208,7 @@ async function createFmTopupPayment(env: Env, topup: Database["public"]["Tables"
 }
 
 export async function createWalletTopupCheckout(env: Env, user: AuthenticatedUser, amountCents: number) {
+  if (!Number.isSafeInteger(amountCents) || amountCents < 500) throw new Error("充值金额不能低于 5 元");
   const { data, error } = await createServiceSupabase(env).rpc("create_wallet_topup", {
     p_user_id: user.id, p_order_no: orderNo(), p_amount_cents: amountCents, p_expires_at: checkoutExpiry(),
   });

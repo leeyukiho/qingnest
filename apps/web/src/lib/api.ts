@@ -138,6 +138,7 @@ export type AccountProfile = {
   usage: {
     sites: number;
     publicSites: number;
+    freeDomains: number;
     storageBytes: number;
     deploymentsToday: number;
   };
@@ -502,7 +503,12 @@ export async function createDomainRenewalPayment(domainId: string, durationMonth
   return result;
 }
 export const getWallet = () => request<WalletSummary>("/api/wallet");
-export const createWalletTopup = (amountCents: number) => request<CheckoutResult>("/api/wallet/topups", { method: "POST", body: JSON.stringify({ amountCents }) });
+export const createWalletTopup = (amountCents: number) => {
+  if (!Number.isSafeInteger(amountCents) || amountCents < 500 || amountCents > 100_000_000) {
+    throw new Error("充值金额必须在 5 元至 100 万元之间，且最多保留两位小数");
+  }
+  return request<CheckoutResult>("/api/wallet/topups", { method: "POST", body: JSON.stringify({ amountCents }) });
+};
 export const getOrders = () => request<PaymentOrder[]>("/api/orders");
 export const getOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`);
 export const cancelOrder = (id: string) => request<PaymentOrder>(`/api/orders/${encodeURIComponent(id)}`, { method: "DELETE" });

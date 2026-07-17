@@ -126,6 +126,7 @@ export type AccountProfile = {
   usage: {
     sites: number;
     publicSites: number;
+    freeDomains: number;
     storageBytes: number;
     deploymentsToday: number;
   };
@@ -994,7 +995,7 @@ export async function getAccountProfile(
   const [
     { data: activeDeployments, error: storageError },
     { count: deploymentsToday, error: deploymentsError },
-    { data: publicDomains, error: publicSitesError },
+    { data: domains, error: domainsError },
   ] = await Promise.all([
     activeDeploymentIds.length > 0
       ? supabase
@@ -1009,23 +1010,23 @@ export async function getAccountProfile(
           .in("site_id", siteIds)
           .gte("created_at", dayAgo)
       : Promise.resolve({ count: 0, error: null }),
-    siteIds.length > 0
-      ? supabase
-          .from("domains")
-          .select("site_id")
-          .eq("user_id", user.id)
-          .eq("status", "active")
-          .in("site_id", siteIds)
-          .not("site_id", "is", null)
-      : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from("domains")
+      .select("site_id, entitlement_source, status")
+      .eq("user_id", user.id)
+      .neq("status", "deleted"),
   ]);
-  const usageError = storageError ?? deploymentsError ?? publicSitesError;
+  const usageError = storageError ?? deploymentsError ?? domainsError;
   if (usageError) throw new Error(usageError.message);
   const publicSites = new Set(
-    (publicDomains ?? [])
+    (domains ?? [])
+      .filter((domain) => domain.status === "active")
       .map((domain) => domain.site_id)
       .filter((siteId): siteId is string => Boolean(siteId)),
   ).size;
+  const freeDomains = (domains ?? []).filter(
+    (domain) => domain.entitlement_source === "plan_grant",
+  ).length;
   const { data: wallet } = await supabase.from("wallet_accounts").select("balance_cents").eq("user_id", user.id).maybeSingle();
 
   return {
@@ -1041,6 +1042,7 @@ export async function getAccountProfile(
     usage: {
       sites: sites?.length ?? 0,
       publicSites,
+      freeDomains,
       storageBytes: (activeDeployments ?? []).reduce(
         (total, deployment) => total + Number(deployment.total_bytes ?? 0),
         0,

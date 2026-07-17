@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, LoaderCircle, Minus } from "lucide-react";
+import { ArrowRight, Check, CreditCard, LoaderCircle, Minus, WalletCards, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { CONTENT_TRACK_CLASS } from "@/app/ui";
-import { STUDIO_BILLING_PATH } from "@/app/navigation";
+import { STUDIO_BILLING_PATH, STUDIO_WALLET_PATH } from "@/app/navigation";
 import { formatBytes } from "@/app/deployment-view";
 import { createPlanPayment, getPublicPlans, type PublicPlan } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -57,6 +57,14 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [payingPlan, setPayingPlan] = useState<string | null>(null);
+  const [checkoutPlan, setCheckoutPlan] = useState<PublicPlan | null>(null);
+
+  useEffect(() => {
+    if (!checkoutPlan) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !payingPlan) setCheckoutPlan(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [checkoutPlan, payingPlan]);
 
   useEffect(() => {
     let active = true;
@@ -84,7 +92,13 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
         onNavigate(STUDIO_BILLING_PATH);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "套餐购买失败");
+      const message = cause instanceof Error ? cause.message : "套餐购买失败";
+      if (paymentMethod === "wallet" && message.includes("余额不足")) {
+        setCheckoutPlan(null);
+        onNavigate(STUDIO_WALLET_PATH);
+      } else {
+        setError(message);
+      }
       setPayingPlan(null);
     }
   };
@@ -142,7 +156,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
                   </div>
                   <h2 className="mt-3 text-xl font-semibold tracking-normal text-white">{plan.label}</h2>
                   <PlanPrice plan={plan} />
-                  {plan.renewal_price_cents === 0 ? <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 px-4 text-sm font-semibold" disabled={payingPlan !== null} onClick={() => onNavigate(startPath)} type="button">免费开始<ArrowRight className="h-4 w-4" /></button> : <div className="mt-5 grid grid-cols-2 gap-2"><button className="h-10 rounded-md bg-white px-3 text-sm font-semibold text-black disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(plan, "wallet")} type="button">{payingPlan === plan.key ? <LoaderCircle className="mx-auto h-4 w-4 animate-spin" /> : "余额购买"}</button><button className="h-10 rounded-md border border-white/25 px-3 text-sm font-semibold text-white disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(plan, "alipay")} type="button">支付宝购买</button></div>}
+                  {plan.renewal_price_cents === 0 ? <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/25 px-4 text-sm font-semibold" disabled={payingPlan !== null} onClick={() => onNavigate(startPath)} type="button">免费开始<ArrowRight className="h-4 w-4" /></button> : <button className="mt-5 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => session ? setCheckoutPlan(plan) : onNavigate(startPath)} type="button">购买套餐<ArrowRight className="h-4 w-4" /></button>}
                   <div className="mt-7 border-t border-white/10 pt-5">
                     <p className="text-xs font-medium text-zinc-500">包含权益</p>
                   </div>
@@ -167,6 +181,16 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
           </div>
         ) : null}
       </section>
+
+      {checkoutPlan ? <div aria-labelledby="checkout-title" aria-modal="true" className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 sm:items-center sm:p-6" onMouseDown={(event) => { if (event.currentTarget === event.target && !payingPlan) setCheckoutPlan(null); }} role="dialog">
+        <div className="w-full border border-white/15 bg-zinc-950 p-5 shadow-2xl sm:max-w-md sm:rounded-md sm:p-6">
+          <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-white" id="checkout-title">选择支付方式</h2><p className="mt-1 text-sm text-zinc-500">{checkoutPlan.label} · ¥{money(checkoutPlan.renewal_price_cents)} / 月</p></div><button aria-label="关闭" className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40" disabled={payingPlan !== null} onClick={() => setCheckoutPlan(null)} type="button"><X className="h-4 w-4" /></button></div>
+          <div className="mt-5 grid gap-2">
+            <button autoFocus className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "wallet")} type="button"><WalletCards className="h-5 w-5 shrink-0 text-emerald-400" /><span><span className="block text-sm font-semibold text-white">账户余额</span><span className="mt-1 block text-xs text-zinc-500">余额不足时可前往钱包充值</span></span>{payingPlan === checkoutPlan.key ? <LoaderCircle className="ml-auto h-4 w-4 animate-spin" /> : <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />}</button>
+            <button className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "alipay")} type="button"><CreditCard className="h-5 w-5 shrink-0 text-sky-400" /><span><span className="block text-sm font-semibold text-white">支付宝</span><span className="mt-1 block text-xs text-zinc-500">创建订单后前往支付宝完成付款</span></span><ArrowRight className="ml-auto h-4 w-4 text-zinc-600" /></button>
+          </div>
+        </div>
+      </div> : null}
 
     </main>
   );
