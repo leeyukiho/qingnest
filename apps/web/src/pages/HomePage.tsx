@@ -10,8 +10,11 @@ import { SparklesCore } from "@/components/ui/sparkles";
 import { VanishingText } from "@/components/ui/vanishing-text";
 import { STUDIO_PATH } from "@/app/navigation";
 import { BRAND_LAYOUT_ID, CONTENT_TRACK_CLASS, HERO_VANISH_FALLBACK_MS, PRIMARY_CTA_BUTTON_CLASS } from "@/app/ui";
+import { getPlatformDomainCatalog } from "@/lib/api";
+import { clientPlatformConfig } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { displayHostname } from "@qingnest/shared/config/domain";
 
 const pageVariants: Variants = {
   enter: (direction: number) => ({
@@ -176,7 +179,10 @@ function HeroScreen({
   onNext: () => void;
   onStart: () => void;
 }) {
-  const [isStarting, setIsStarting] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [domainSuffixes, setDomainSuffixes] = useState<string[]>([
+    clientPlatformConfig.domains.distributionRoot
+  ]);
   const startTimeoutRef = useRef<number | null>(null);
   const hasStartedRouteRef = useRef(false);
 
@@ -188,7 +194,22 @@ function HeroScreen({
     };
   }, []);
 
-  const finishStart = useCallback(() => {
+  useEffect(() => {
+    let active = true;
+
+    getPlatformDomainCatalog()
+      .then((options) => {
+        if (!active || !options.length) return;
+        setDomainSuffixes(Array.from(new Set(options.map((option) => option.hostname_suffix))));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const finishStart = useCallback(() => {
     if (hasStartedRouteRef.current) return;
 
     hasStartedRouteRef.current = true;
@@ -242,8 +263,19 @@ function HeroScreen({
             />
           </p>
           <p className="text-[clamp(0.82rem,2.2vw,1rem)] font-medium leading-6 text-cyan-100/75">
-            注册赠送永久域名
-          </p>
+            注册赠送永久域名
+          </p>
+          <div aria-label="平台可选域名" className="flex max-w-full flex-wrap items-center justify-center gap-2">
+            <span className="text-xs font-medium text-zinc-500">可选域名</span>
+            {domainSuffixes.slice(0, 4).map((suffix) => (
+              <span
+                className="max-w-full rounded-md border border-cyan-200/20 bg-cyan-300/[0.06] px-2.5 py-1 font-mono text-xs text-cyan-50/90 [overflow-wrap:anywhere]"
+                key={suffix}
+              >
+                {displayHostname(suffix)}
+              </span>
+            ))}
+          </div>
         </motion.div>
 
         <motion.div
