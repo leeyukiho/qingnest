@@ -1231,7 +1231,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                     <Cell>
                       <ClearableInput
                         aria-label="平台域名后缀"
-                        disabled={Boolean(draft.cloudflare_zone_id)}
+                        disabled
                         onChange={(e) =>
                           setPriceDrafts((all) => ({
                             ...all,
@@ -1242,7 +1242,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                             },
                           }))
                         }
-                        value={draft.label || draft.hostname_suffix}
+                        value={draft.hostname_suffix}
                       />
                       <FieldError />
                     </Cell>

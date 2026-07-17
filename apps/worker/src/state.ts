@@ -1134,12 +1134,21 @@ export async function updateAdminSite(env: Env, user: AuthenticatedUser, input: 
   ]);
   if (domainsError) throw new Error(domainsError.message);
   if (deploymentResult.error) throw new Error(deploymentResult.error.message);
-  await Promise.all((domains ?? []).map((domain) =>
-    deploymentResult.data &&
-    (input.status === "blocked" || input.status === "active" || input.status === "pending_review")
-      ? cachePublicSlot(env, domain, input.siteId, deploymentResult.data, input.status)
-      : deleteDomainCache(env, domain.hostname),
-  ));
+  if (input.status === "blocked") {
+    await Promise.all((domains ?? []).map((domain) => deleteDomainCache(env, domain.hostname)));
+    const { error: detachError } = await supabase
+      .from("domains")
+      .update({ site_id: null, last_binding_change_at: new Date().toISOString() })
+      .eq("site_id", input.siteId)
+      .neq("status", "deleted");
+    if (detachError) throw new Error(detachError.message);
+  } else {
+    await Promise.all((domains ?? []).map((domain) =>
+      deploymentResult.data && (input.status === "active" || input.status === "pending_review")
+        ? cachePublicSlot(env, domain, input.siteId, deploymentResult.data, input.status)
+        : deleteDomainCache(env, domain.hostname),
+    ));
+  }
   await supabase.from("audit_events").insert({ user_id: user.id, site_id: input.siteId, event_type: "admin.site.status_updated", message: `管理员将站点 ${data.name} 调整为 ${input.status}` });
   return { id: data.id, name: data.name, status: data.status };
 }
@@ -1207,6 +1216,9 @@ export async function updateAdminDomainPrice(env: Env, user: AuthenticatedUser, 
   const normalizedSuffix = update.hostname_suffix ? normalizeHostname(update.hostname_suffix) : null;
   if (normalizedSuffix && !normalizedSuffix.ok) throw new Error(normalizedSuffix.reason);
   const requestedSuffix = normalizedSuffix?.ascii;
+  if (requestedSuffix && requestedSuffix !== current.hostname_suffix) {
+    throw new Error("平台域名后缀固定为当前平台域名，不能直接修改，请新增后缀后再下架旧后缀");
+  }
   if (current.cloudflare_zone_id && requestedSuffix && requestedSuffix !== current.hostname_suffix) {
     throw new Error("已接入 Cloudflare 的域名后缀不能直接修改，请新增域名后再下架旧域名");
   }
