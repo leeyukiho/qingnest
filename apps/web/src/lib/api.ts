@@ -314,6 +314,7 @@ export async function updateAdminSite(siteId: string, status: "draft" | "active"
   return result;
 }
 async function adminMutation<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) { const result = await request<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) }); adminOverviewCache = null; return result; }
+export const deleteAdminSite = (siteId: string) => adminMutation<{ id: string; name: string }>(`/api/admin/sites/${encodeURIComponent(siteId)}`, "DELETE");
 export const createAdminDomain = (input: { userId: string; hostname: string; type: "platform_subdomain"; siteId?: string | null }) => adminMutation("/api/admin/domains", "POST", input);
 export const updateAdminDomain = (id: string, input: { status?: "active" | "pending_review" | "blocked"; siteId?: string | null }) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "PATCH", input);
 export const deleteAdminDomain = (id: string) => adminMutation(`/api/admin/domains/${encodeURIComponent(id)}`, "DELETE");

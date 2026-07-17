@@ -16,6 +16,7 @@ import {
   claimFreePublicSlot,
   createPrivatePreview,
   createUploadSession,
+  deleteAdminSite,
   deleteProject,
   getAccountProfile,
   getAdminOverview,
@@ -374,6 +375,11 @@ export async function handleApi(request: Request, env: Env) {
       const input = await readJson<AdminSiteUpdateInput>(request);
       if (!input.status) return problem("请选择站点状态", 400);
       return json(await updateAdminSite(env, user, { siteId: decodeURIComponent(adminSiteMatch[1] ?? ""), status: input.status }));
+    }
+    if (request.method === "DELETE" && adminSiteMatch) {
+      const user = await maybeGetUser(request, env, { requireEmailConfirmed: true });
+      if (!user) return problem("请先登录", 401);
+      return json(await deleteAdminSite(env, user, decodeURIComponent(adminSiteMatch[1] ?? "")));
     }
     const adminSitePreviewMatch = url.pathname.match(/^\/api\/admin\/sites\/([^/]+)\/preview$/);
     if (request.method === "POST" && adminSitePreviewMatch) {

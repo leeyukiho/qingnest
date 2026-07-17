@@ -214,10 +214,14 @@ export function StudioSidebar({
               <span className="text-xs font-medium text-zinc-300">套餐用量</span>
               <span className="text-[11px] tabular-nums text-zinc-500">余额 ¥{(account.walletBalanceCents / 100).toFixed(2)}</span>
             </span>
-            <span className="mt-3 block">
+              <span className="mt-3 block">
               <span className="flex items-center justify-between gap-2 text-[11px]"><span className="text-zinc-500">项目</span><strong className="font-medium tabular-nums text-zinc-300">{projectUsage} / {projectLimit}</strong></span>
               <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-zinc-300" style={{ width: `${Math.min(100, projectLimit > 0 ? (projectUsage / projectLimit) * 100 : 0)}%` }} /></span>
-            </span>
+              </span>
+              <span className="mt-3 grid grid-cols-2 gap-2 border-t border-white/10 pt-3 text-[11px]">
+                <span><span className="block text-zinc-500">公开站点</span><strong className="mt-1 block font-medium tabular-nums text-zinc-300">{usage?.publicSites ?? 0} / {plan.quotas.user.maxPublicSites}</strong></span>
+                <span><span className="block text-zinc-500">今日发布</span><strong className="mt-1 block font-medium tabular-nums text-zinc-300">{usage?.deploymentsToday ?? 0} / {plan.quotas.user.maxDeploymentsPerDay}</strong></span>
+              </span>
             <span className="mt-3 block">
               <span className="flex items-center justify-between gap-2 text-[11px]"><span className="text-zinc-500">存储</span><strong className="font-medium tabular-nums text-zinc-300">{formatBytes(storageUsage)} / {formatBytes(storageLimit)}</strong></span>
               <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-zinc-300" style={{ width: `${Math.min(100, storageLimit > 0 ? (storageUsage / storageLimit) * 100 : 0)}%` }} /></span>

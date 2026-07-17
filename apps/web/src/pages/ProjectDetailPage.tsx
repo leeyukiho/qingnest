@@ -13,12 +13,12 @@ import {
   Loader2,
   Lock,
   Save,
+  ShieldAlert,
   Trash2,
   UploadCloud,
 } from "lucide-react";
 import {
   getPlanConfig,
-  validateSubdomain,
 } from "@qingnest/shared/config/platform";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { StudioBreadcrumbTitle } from "@/app/StudioBreadcrumbTitle";
@@ -39,7 +39,6 @@ import {
 import { FileUpload } from "@/components/ui/file-upload";
 import {
   createPrivatePreview,
-  createPublicSlot,
   createUploadSession,
   deleteProject,
   getCachedProject,
@@ -103,11 +102,11 @@ export function ProjectDetailPage({
     getCachedPublicSlots() ?? [],
   );
   const [showBindReminder, setShowBindReminder] = useState(false);
-  const [subdomain, setSubdomain] = useState("");
   const [publishingBusy, setPublishingBusy] = useState(false);
   const freeDomainLimit = account?.planConfig?.quotas.user.maxFreeDomains ?? 0;
   const freeDomainsUsed = account?.usage.freeDomains ?? 0;
   const freeDomainsRemaining = Math.max(0, freeDomainLimit - freeDomainsUsed);
+  const publicSitesUsed = account?.usage.publicSites ?? new Set(slots.flatMap((slot) => slot.siteId ? [slot.siteId] : [])).size;
   const [confirmAction, setConfirmAction] = useState<
     { type: "bind" | "unbind"; slot: PublicSlot } | { type: "delete" } | null
   >(null);
@@ -219,27 +218,6 @@ export function ProjectDetailPage({
     }
   }
 
-  async function createAndBindSlot(event: React.FormEvent) {
-    event.preventDefault();
-    const validation = validateSubdomain(subdomain);
-    if (!validation.ok)
-      return showToast(validation.reason ?? "请输入可用的公开地址", "error");
-    setPublishingBusy(true);
-    try {
-      await createPublicSlot({ siteId, subdomain: validation.normalized });
-      await refresh();
-      setSubdomain("");
-      showToast("公开地址已绑定到当前项目", "success");
-    } catch (cause) {
-      showToast(
-        cause instanceof Error ? cause.message : "公开地址创建失败",
-        "error",
-      );
-    } finally {
-      setPublishingBusy(false);
-    }
-  }
-
   async function bindSlot(slot: PublicSlot) {
     if (slot.siteId === siteId) return;
     if (slot.siteId) return setConfirmAction({ type: "bind", slot });
@@ -333,6 +311,10 @@ export function ProjectDetailPage({
   const canPublish = Boolean(
     project?.deployments.some((deployment) => deployment.status === "active"),
   );
+  const isBlocked = project?.status === "blocked";
+  const effectiveTab = isBlocked && (tab === "versions" || tab === "publishing")
+    ? "overview"
+    : tab;
   return (
     <div className="min-h-dvh bg-black">
       <section className={STUDIO_SECTION_CLASS}>
@@ -346,7 +328,12 @@ export function ProjectDetailPage({
             <div className={STUDIO_HEADER_CLASS}>
               <StudioBreadcrumbTitle backLabel="我的项目" currentLabel={project?.name ?? "项目"} onBack={() => onNavigate(STUDIO_PROJECTS_PATH)} />
               <div className="flex flex-wrap items-center gap-2">
-                {project?.publicUrl ? (
+                {isBlocked ? (
+                  <span className="inline-flex h-10 items-center gap-2 rounded-md border border-red-400/30 px-4 text-sm text-red-300">
+                    <Lock className="h-4 w-4" />
+                    项目已封禁
+                  </span>
+                ) : project?.publicUrl ? (
                 <a
                   className="inline-flex h-10 items-center gap-2 rounded-md border border-white/15 px-4 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
                   href={project.publicUrl}
@@ -384,13 +371,16 @@ export function ProjectDetailPage({
             >
               {tabs.map(([value, label]) => (
                 <button
-                  aria-selected={tab === value}
+                  aria-selected={effectiveTab === value}
                   className={cn(
                     "cursor-pointer whitespace-nowrap border-b-2 px-4 py-3 text-sm transition-colors",
-                    tab === value
+                    effectiveTab === value
                       ? "border-white text-white"
                       : "border-transparent text-zinc-500 hover:text-zinc-200",
+                    isBlocked && (value === "versions" || value === "publishing") &&
+                      "cursor-not-allowed text-zinc-700 hover:text-zinc-700",
                   )}
+                  disabled={isBlocked && (value === "versions" || value === "publishing")}
                   key={value}
                   onClick={() => {
                     selectTab(value);
@@ -406,7 +396,19 @@ export function ProjectDetailPage({
 
             <ToastMessage message={error} />
 
-            {project && tab === "overview" ? (
+            {isBlocked ? (
+              <div className="mt-5 flex items-start gap-3 rounded-md border border-red-400/30 bg-red-400/[0.06] p-4 text-sm" role="alert">
+                <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+                <div>
+                  <p className="font-semibold text-red-200">项目已被管理员封禁</p>
+                  <p className="mt-1 leading-6 text-zinc-400">
+                    当前不能发布、预览、修改项目或调整域名绑定。如不再需要，可在“设置”中删除项目；删除后域名会自动解绑并保留在你的账户中。
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {project && effectiveTab === "overview" ? (
               <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
                 <div className={`${STUDIO_PANEL_CLASS} overflow-hidden`}>
                   <div className="p-5 sm:p-6">
@@ -430,13 +432,15 @@ export function ProjectDetailPage({
                       </span>
                     </div>
                     <p className="mt-4 text-sm leading-6 text-zinc-500">
-                      {currentSlot
+                      {isBlocked
+                        ? "公开访问已停止，项目解除封禁前不会对外提供内容。"
+                        : currentSlot
                         ? `访客可通过 ${currentSlot.hostname} 访问当前版本。`
                         : canPublish
                           ? "版本已准备好，绑定公开地址后访客即可访问。"
                           : "请先上传项目资源并生成第一个私人版本。"}
                     </p>
-                    <div className="mt-5 flex flex-wrap gap-3">
+                    {!isBlocked ? <div className="mt-5 flex flex-wrap gap-3">
                       <button
                         className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black"
                         onClick={() => selectTab("versions")}
@@ -455,11 +459,11 @@ export function ProjectDetailPage({
                           设置公开地址
                         </button>
                       ) : null}
-                    </div>
+                    </div> : null}
                   </div>
                   <div className="grid gap-px border-t border-white/10 bg-white/10 sm:grid-cols-3">
                     {[
-                      ["可见范围", currentSlot ? "公开访问" : "仅自己可见"],
+                      ["可见范围", isBlocked ? "已停止访问" : currentSlot ? "公开访问" : "仅自己可见"],
                       ["公开地址", currentSlot?.hostname || "未绑定"],
                       [
                         "最近更新",
@@ -518,7 +522,7 @@ export function ProjectDetailPage({
               </div>
             ) : null}
 
-            {project && tab === "publishing" ? (
+            {project && effectiveTab === "publishing" ? (
               <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
                 <div className={`${STUDIO_PANEL_CLASS} p-5 sm:p-6`}>
                   <div className="flex items-start gap-3">
@@ -590,51 +594,17 @@ export function ProjectDetailPage({
                       </div>
                     ))}
                   </div>
-                  {slots.length < plan.quotas.user.maxPublicSites ? (
-                    <form
-                      className="mt-6 border-t border-white/10 pt-5"
-                      onSubmit={createAndBindSlot}
-                    >
-                      <div className="mb-4 rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-medium text-zinc-200">{account?.planConfig?.label ?? "当前套餐"} 的公开权益</span>
-                          <span className="text-zinc-400">公开项目 {slots.length} / {plan.quotas.user.maxPublicSites}</span>
-                        </div>
-                        <p className="mt-2 leading-6 text-zinc-500">套餐免费域名已使用 {freeDomainsUsed} / {freeDomainLimit} 个，剩余 {freeDomainsRemaining} 个。套餐赠送域名长期有效；其他平台域名按租期计费，到期后需要续费。</p>
-                        <button className="mt-2 inline-flex items-center gap-1 text-sm text-zinc-200 underline underline-offset-4 hover:text-white" onClick={() => onNavigate(STUDIO_DOMAINS_PATH)} type="button">购买或领取平台域名 <ExternalLink className="h-3.5 w-3.5" /></button>
+                  {publicSitesUsed < plan.quotas.user.maxPublicSites ? (
+                    <div className="mt-6 flex flex-col gap-4 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">{freeDomainsRemaining > 0 ? "领取一个新的公开地址" : "需要更多公开地址？"}</p>
+                        <p className="mt-1 text-sm leading-6 text-zinc-500">{freeDomainsRemaining > 0 ? `你的套餐还可免费领取 ${freeDomainsRemaining} 个平台域名。领取后返回这里绑定到当前项目。` : "当前套餐的免费域名额度已用完，你可以单独购买有期限的平台域名。"}</p>
                       </div>
-                      <label className="grid gap-2 text-sm font-medium text-zinc-300">
-                        创建新的公开地址
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border border-white/20 focus-within:border-white/50">
-                          <input
-                            className="h-11 min-w-0 bg-black px-3 text-white outline-none placeholder:text-zinc-600"
-                            disabled={!canPublish || publishingBusy}
-                            onChange={(event) =>
-                              setSubdomain(event.target.value.toLowerCase())
-                            }
-                            placeholder="my-project"
-                            value={subdomain}
-                          />
-                          <span className="inline-flex items-center border-l border-white/15 px-3 text-sm text-zinc-500">
-                            .985201314.xyz
-                          </span>
-                        </div>
-                      </label>
-                      <button
-                        className="mt-4 inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black disabled:opacity-50"
-                        disabled={
-                          !canPublish || publishingBusy || !subdomain.trim()
-                        }
-                        type="submit"
-                      >
-                        {publishingBusy ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Globe2 className="h-4 w-4" />
-                        )}
-                        创建并公开
+                      <button className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black" onClick={() => onNavigate(STUDIO_DOMAINS_PATH)} type="button">
+                        <Globe2 className="h-4 w-4" />
+                        {freeDomainsRemaining > 0 ? "去领取免费域名" : "购买平台域名"}
                       </button>
-                    </form>
+                    </div>
                   ) : (
                     <p className="mt-6 border-t border-white/10 pt-5 text-sm text-zinc-500">
                       公开站点额度已用完。升级套餐或购买额外公开地址后，可以同时公开更多项目。
@@ -644,8 +614,13 @@ export function ProjectDetailPage({
                 <aside className={`${STUDIO_PANEL_CLASS} h-fit p-5`}>
                   <p className="text-xs text-zinc-500">公开站点额度</p>
                   <p className="mt-2 text-2xl font-semibold text-white">
-                    {slots.length} / {plan.quotas.user.maxPublicSites}
+                    {publicSitesUsed} / {plan.quotas.user.maxPublicSites}
                   </p>
+                  <div className="mt-5 border-t border-white/10 pt-4">
+                    <p className="text-xs text-zinc-500">套餐免费平台域名</p>
+                    <p className="mt-2 text-lg font-semibold text-white">剩余 {freeDomainsRemaining} 个</p>
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">已使用 {freeDomainsUsed} / {freeDomainLimit} 个。套餐赠送域名长期有效；单独购买的平台域名按所选期限有效。</p>
+                  </div>
                   <p className="mt-4 text-sm leading-6 text-zinc-500">
                     私人项目不占用公开额度。切换项目不会改变公开地址。
                   </p>
@@ -658,7 +633,7 @@ export function ProjectDetailPage({
               </div>
             ) : null}
 
-            {project && tab === "versions" ? (
+            {project && effectiveTab === "versions" ? (
               <div className="mt-5 grid gap-5">
                 <form
                   className={`${STUDIO_PANEL_CLASS} p-5 sm:p-6`}
@@ -847,7 +822,7 @@ export function ProjectDetailPage({
               </div>
             ) : null}
 
-            {project && tab === "settings" ? (
+            {project && effectiveTab === "settings" ? (
               <div className="mt-5 grid gap-5">
                 <form
                   className={`${STUDIO_PANEL_CLASS} p-5 sm:p-6`}
@@ -857,6 +832,7 @@ export function ProjectDetailPage({
                     项目名称
                     <input
                       className="h-11 rounded-md border border-white/20 bg-black px-3 text-white outline-none focus:border-white/50"
+                      disabled={isBlocked}
                       maxLength={80}
                       onChange={(event) => setName(event.target.value)}
                       value={name}
@@ -865,7 +841,7 @@ export function ProjectDetailPage({
                   <button
                     className="mt-5 inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black disabled:opacity-50"
                     disabled={
-                      busy || !name.trim() || name.trim() === project.name
+                      busy || isBlocked || !name.trim() || name.trim() === project.name
                     }
                     type="submit"
                   >

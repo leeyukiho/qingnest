@@ -24,9 +24,17 @@ export function NotificationCenter({ enabled, variant = "icon" }: { enabled: boo
   useEffect(() => {
     if (!enabled) { setItems([]); setOpen(false); return; }
     void load();
-    const timer = window.setInterval(load, 60_000);
-    window.addEventListener("focus", load);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", load); };
+    const loadWhenVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const timer = window.setInterval(loadWhenVisible, 15 * 60_000);
+    window.addEventListener("focus", loadWhenVisible);
+    document.addEventListener("visibilitychange", loadWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", loadWhenVisible);
+      document.removeEventListener("visibilitychange", loadWhenVisible);
+    };
   }, [enabled, load]);
 
   const pending = useMemo(() => [...items].reverse().find((item) => !item.acknowledgedAt) ?? null, [items]);
@@ -58,7 +66,7 @@ export function NotificationCenter({ enabled, variant = "icon" }: { enabled: boo
 
   return <>
     <div className="relative z-[70]">
-      <button aria-label="查看通知" className={cn("relative flex items-center rounded-md border text-zinc-300 transition-colors hover:border-white/20 hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70", variant === "sidebar" ? "min-w-36 gap-3 border-transparent px-3 py-2.5 text-left lg:min-w-0" : "h-10 w-10 justify-center border-white/15 bg-zinc-950/95 shadow-xl backdrop-blur")} onClick={() => setOpen((value) => !value)} type="button">
+      <button aria-label="查看通知" className={cn("relative flex items-center rounded-md border text-zinc-300 transition-colors hover:border-white/20 hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70", variant === "sidebar" ? "min-w-36 gap-3 border-transparent px-3 py-2.5 text-left lg:min-w-0" : "h-10 w-10 justify-center border-white/15 bg-zinc-950/95 shadow-xl backdrop-blur")} onClick={() => { if (!open) void load(); setOpen((value) => !value); }} type="button">
         <Bell className="h-4 w-4" />
         {variant === "sidebar" ? <><span className="min-w-0 flex-1 truncate text-sm font-medium">通知</span>{unreadCount ? <span className="flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">{Math.min(unreadCount, 99)}</span> : null}</> : unreadCount ? <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">{Math.min(unreadCount, 99)}</span> : null}
       </button>

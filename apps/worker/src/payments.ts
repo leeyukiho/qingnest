@@ -312,9 +312,9 @@ export async function getDomainRenewalEligibility(env: Env, user: AuthenticatedU
   if (expiresAt > now + price.renewal_window_days * 86_400_000) return { eligible: false, reason: `到期前 ${price.renewal_window_days} 天开放续费`, allowedDurations: [] as number[], renewalWindowDays: price.renewal_window_days };
   const allowedDurations = ([1, 3, 6, 12] as const).filter((months) => {
     const next = new Date(domain.expires_at);
-    next.setUTCMonth(next.getUTCMonth() + months);
+    next.setTime(next.getTime() + (months === 12 ? 365 : months * 30) * 86_400_000);
     const maximum = new Date();
-    maximum.setUTCMonth(maximum.getUTCMonth() + price.max_advance_months);
+    maximum.setTime(maximum.getTime() + (price.max_advance_months === 12 ? 365 : price.max_advance_months * 30) * 86_400_000);
     return next <= maximum;
   });
   return { eligible: allowedDurations.length > 0, reason: allowedDurations.length ? null : "已达到最长持有期限",
@@ -528,15 +528,10 @@ export async function runPaymentLifecycle(env: Env) {
   if (!hasServiceSupabase(env)) return;
   const supabase = createServiceSupabase(env);
   const now = new Date().toISOString();
-  await expirePendingOrders(env);
-  await supabase.from("wallet_topups").update({ status: "expired", updated_at: now }).eq("status", "pending").lt("expires_at", now);
-  await supabase.from("domain_reservations").update({ status: "released", updated_at: now }).eq("status", "active").lt("expires_at", now);
-  await supabase.from("profiles").update({ plan: "free", plan_expires_at: null }).not("plan_expires_at", "is", null).lte("plan_expires_at", now);
-  const { data: reclaimed, error: reconcileError } = await supabase.rpc("reconcile_domain_entitlements");
-  if (reconcileError) throw new Error(reconcileError.message);
-  await Promise.all((reclaimed ?? []).map((domain) => deleteDomainCache(env, domain.hostname)));
-  const { data: jobs } = await supabase.from("fulfillment_jobs").select("order_id").eq("status", "failed").lte("next_attempt_at", now).limit(20);
-  for (const job of jobs ?? []) {
-    try { await retryOrderFulfillment(env, job.order_id); } catch { /* The job keeps its failure state for admin review. */ }
+  const { data, error } = await (supabase as any).rpc("run_payment_maintenance", { p_now: now });
+  if (error) throw new Error(error.message);
+  await Promise.all((data?.reclaimed_hostnames ?? []).map((hostname: string) => deleteDomainCache(env, hostname)));
+  for (const orderId of data?.failed_order_ids ?? []) {
+    try { await retryOrderFulfillment(env, orderId); } catch { /* The job keeps its failure state for admin review. */ }
   }
 }

@@ -77,7 +77,7 @@ async function fetchCloudflareCapacity(env: Env): Promise<ProviderSample> {
       workersInvocationsAdaptive(limit: 10000, filter: { scriptName: $scriptName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } }
       kvOperationsAdaptiveGroups(limit: 10000, filter: { namespaceId: $namespaceId, date_geq: $startDate, date_leq: $endDate }) { sum { requests } dimensions { actionType } }
       r2OperationsAdaptiveGroups(limit: 10000, filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { sum { requests } dimensions { actionType } }
-      r2StorageAdaptiveGroups(limit: 1, orderBy: [datetime_DESC], filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { max { payloadSize metadataSize } }
+      r2StorageAdaptiveGroups(limit: 1, filter: { bucketName: $bucketName, datetime_geq: $start, datetime_leq: $end }) { max { payloadSize metadataSize } }
     } }
   }`;
   const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
@@ -122,24 +122,21 @@ function providerObserved(usage: any): Pick<CapacityLimits, ProviderMetric> {
 
 export async function recordPagesDeployment(env: Env, failed = false) {
   const db = createServiceSupabase(env) as any;
-  const month = monthStart();
-  const { data } = await db.from("infrastructure_usage_monthly").select("pages_deployments, pages_failures").eq("month_start", month).maybeSingle();
-  await db.from("infrastructure_usage_monthly").upsert({ month_start: month, pages_deployments: Number(data?.pages_deployments ?? 0) + 1, pages_failures: Number(data?.pages_failures ?? 0) + (failed ? 1 : 0), updated_at: new Date().toISOString() });
+  const { error } = await db.rpc("increment_pages_deployment", { p_month_start: monthStart(), p_failed: failed });
+  if (error) throw new Error(error.message);
 }
 
-export async function getCapacityDashboard(env: Env, user: AuthenticatedUser) {
-  await assertAdmin(env, user);
+export async function getCapacityDashboard(env: Env, user: AuthenticatedUser, adminVerified = false) {
+  if (!adminVerified) await assertAdmin(env, user);
   const db = createServiceSupabase(env) as any;
-  const [{ data: settings }, { data: usage }, { data: acceleration }, { data: resendUsage }] = await Promise.all([
-    db.from("infrastructure_capacity_settings").select("*").eq("id", true).single(),
-    db.from("infrastructure_usage_monthly").select("*").eq("month_start", monthStart()).maybeSingle(),
-    db.from("pages_accelerations").select("status, pages_project_name"),
-    db.from("resend_email_usage_daily").select("usage_date, sent_count").gte("usage_date", monthStart()),
-  ]);
-  const accelerated = (acceleration ?? []).filter((item: any) => item.status === "accelerated").length;
-  const projects = (acceleration ?? []).filter((item: any) => item.pages_project_name).length;
-  const resendEmailsDaily = Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0);
-  const resendEmailsMonthly = (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0);
+  const { data: snapshot, error } = await db.rpc("get_capacity_snapshot", { p_month_start: monthStart(), p_usage_date: usageDate() });
+  if (error) throw new Error(error.message);
+  const settings = snapshot.settings;
+  const usage = snapshot.usage;
+  const accelerated = Number(snapshot.accelerated_sites ?? 0);
+  const projects = Number(snapshot.pages_projects ?? 0);
+  const resendEmailsDaily = Number(snapshot.resend_emails_daily ?? 0);
+  const resendEmailsMonthly = Number(snapshot.resend_emails_monthly ?? 0);
   const observed = {
     ...providerObserved(usage),
     pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: projects, resendEmailsDaily, resendEmailsMonthly,
@@ -163,23 +160,26 @@ export async function updateCapacitySettings(env: Env, user: AuthenticatedUser, 
   }));
   const db = createServiceSupabase(env) as any;
   await db.from("infrastructure_capacity_settings").upsert({ id: true, stage: input.stage, resend_plan: input.resendPlan, limits, thresholds: metricThresholds, notification_cooldown_hours: Math.min(720, Math.max(1, Math.floor(Number(input.notificationCooldownHours)))), updated_by: user.id, updated_at: new Date().toISOString() });
-  return getCapacityDashboard(env, user);
+  return getCapacityDashboard(env, user, true);
 }
 
 export async function evaluateCapacityAlerts(env: Env) {
   const db = createServiceSupabase(env) as any;
   await refreshProviderCapacity(env, db);
-  const [{ data: settings }, { data: usage }, { data: acceleration }, { data: resendUsage }] = await Promise.all([
-    db.from("infrastructure_capacity_settings").select("*").eq("id", true).maybeSingle(),
-    db.from("infrastructure_usage_monthly").select("*").eq("month_start", monthStart()).maybeSingle(),
-    db.from("pages_accelerations").select("pages_project_name"),
-    db.from("resend_email_usage_daily").select("usage_date, sent_count").gte("usage_date", monthStart()),
-  ]);
+  const { data: snapshot, error: snapshotError } = await db.rpc("get_capacity_snapshot", { p_month_start: monthStart(), p_usage_date: usageDate() });
+  if (snapshotError) throw new Error(snapshotError.message);
+  const settings = snapshot.settings;
+  const usage = snapshot.usage;
   if (!settings) return;
-  const observed: Partial<CapacityLimits> = { ...providerObserved(usage), pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: (acceleration ?? []).filter((item: any) => item.pages_project_name).length, resendEmailsDaily: Number((resendUsage ?? []).find((item: any) => item.usage_date === usageDate())?.sent_count ?? 0), resendEmailsMonthly: (resendUsage ?? []).reduce((sum: number, item: any) => sum + Number(item.sent_count ?? 0), 0) };
+  const observed: Partial<CapacityLimits> = { ...providerObserved(usage), pagesDeployments: Number(usage?.pages_deployments ?? 0), pagesProjects: Number(snapshot.pages_projects ?? 0), resendEmailsDaily: Number(snapshot.resend_emails_daily ?? 0), resendEmailsMonthly: Number(snapshot.resend_emails_monthly ?? 0) };
   const cooldownMs = Number(settings.notification_cooldown_hours) * 3_600_000;
   const resendPlan = resendPresets[settings.resend_plan as ResendPlan] ? settings.resend_plan as ResendPlan : "free";
   const limits = planLimits(settings.stage as CapacityStage, resendPlan);
+  const { data: priorRows, error: priorError } = await db.from("infrastructure_alert_state").select("metric_key, severity, last_notified_at").in("metric_key", Object.keys(observed));
+  if (priorError) throw new Error(priorError.message);
+  const priorByMetric = new Map<string, { severity: string; last_notified_at: string }>(
+    (priorRows ?? []).map((row: any) => [row.metric_key, row]),
+  );
   for (const [key, value] of Object.entries(observed)) {
     const limit = Number(limits[key as keyof CapacityLimits] ?? 0);
     if (!limit) continue;
@@ -187,7 +187,7 @@ export async function evaluateCapacityAlerts(env: Env) {
     const metricThreshold = settings.thresholds?.[key] ?? { warningPercent: settings.warning_percent, criticalPercent: settings.critical_percent };
     const severity = percent >= metricThreshold.criticalPercent ? "critical" : percent >= metricThreshold.warningPercent ? "warning" : null;
     if (!severity) continue;
-    const { data: prior } = await db.from("infrastructure_alert_state").select("severity, last_notified_at").eq("metric_key", key).maybeSingle();
+    const prior = priorByMetric.get(key);
     const escalated = severity === "critical" && prior?.severity !== "critical";
     if (prior && !escalated && Date.now() - Date.parse(prior.last_notified_at) < cooldownMs) continue;
     await Promise.all([

@@ -9,6 +9,7 @@ import {
   Link2,
   Loader2,
   Search,
+  ShieldAlert,
   ShoppingBag,
   Unplug,
 } from "lucide-react";
@@ -43,10 +44,13 @@ import {
 import { displayHostname } from "@qingnest/shared/config/domain";
 
 function formatRemainingTime(expiresAt: string) {
-  const days = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
-  if (days >= 365) return `剩余 ${Math.floor(days / 365)} 年`;
-  if (days >= 30) return `剩余 ${Math.floor(days / 30)} 个月`;
-  return `剩余 ${days} 天`;
+  const remainingMs = Math.max(0, new Date(expiresAt).getTime() - Date.now());
+  if (remainingMs <= 86_400_000) {
+    const hours = Math.max(0, Math.round(remainingMs / 3_600_000));
+    return { label: `剩余 ${hours} 小时`, urgent: true };
+  }
+  const days = Math.max(1, Math.round(remainingMs / 86_400_000));
+  return { label: `剩余 ${days} 天`, urgent: false };
 }
 
 export function DomainsPage({
@@ -194,7 +198,7 @@ export function DomainsPage({
                 type="button"
               >
                 <ShoppingBag className="h-4 w-4" />
-                返回域名市场
+                购买平台域名
               </button>
             </div>
             <ToastMessage message={error} />
@@ -234,6 +238,7 @@ export function DomainsPage({
                   const project = slot.siteId
                     ? projectsById.get(slot.siteId)
                     : null;
+                  const bindingBlocked = slot.status === "blocked" || project?.status === "blocked";
                   return (
                     <div
                       className="grid gap-4 border-b border-white/10 p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_15rem] md:items-center"
@@ -255,7 +260,7 @@ export function DomainsPage({
                           ) : slot.entitlementSource === "plan_grant" ? (
                             <span>套餐赠送 · 长期有效</span>
                           ) : (
-                            <><span>有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</span><span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-zinc-500">{formatRemainingTime(slot.expiresAt)}</span></>
+                            <><span>有效期至 {new Date(slot.expiresAt).toLocaleDateString("zh-CN")}</span>{(() => { const remaining = formatRemainingTime(slot.expiresAt); return <span className={`rounded bg-white/[0.06] px-1.5 py-0.5 ${remaining.urgent ? "text-red-400" : "text-zinc-500"}`}>{remaining.label}</span>; })()}</>
                           )}
                         </p>
                       </div>
@@ -287,6 +292,7 @@ export function DomainsPage({
                                 className="h-9 max-w-full cursor-pointer appearance-none bg-transparent py-0 pl-0 pr-6 text-sm text-current outline-none disabled:cursor-not-allowed disabled:text-zinc-600"
                                 disabled={
                                   bindingSlotId !== null ||
+                                  bindingBlocked ||
                                   bindableProjects.length === 0
                                 }
                                 onChange={(event) => {
@@ -300,9 +306,11 @@ export function DomainsPage({
                                   className="bg-zinc-950 text-zinc-500"
                                   value=""
                                 >
-                                  {bindableProjects.length > 0
-                                    ? "选择未绑定项目"
-                                    : "暂无可绑定项目"}
+                                  {bindingBlocked
+                                    ? "该域名已封禁，暂不能绑定"
+                                    : bindableProjects.length > 0
+                                      ? "选择未绑定项目"
+                                      : "暂无可绑定项目"}
                                 </option>
                                 {bindableProjects.map((candidate) => (
                                   <option
@@ -320,8 +328,8 @@ export function DomainsPage({
                         )}
                       </div>
                       <div className="flex flex-wrap gap-2 md:justify-end">
-                        {slot.type === "platform_subdomain" && slot.entitlementSource === "paid_rental" ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50" disabled={renewalBusy !== null} onClick={() => void beginRenewal(slot)} type="button">{renewalBusy === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}续费</button> : null}
-                        <a
+                        {slot.type === "platform_subdomain" && slot.entitlementSource === "paid_rental" ? <button className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50" disabled={renewalBusy !== null || slot.status === "blocked"} onClick={() => void beginRenewal(slot)} type="button">{renewalBusy === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}续费</button> : null}
+                        {!bindingBlocked ? <a
                           className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-sm text-zinc-300 hover:bg-white/5"
                           href={slot.publicUrl}
                           rel="noreferrer"
@@ -329,8 +337,8 @@ export function DomainsPage({
                         >
                           访问网站
                           <ExternalLink className="h-4 w-4" />
-                        </a>
-                        {project ? (
+                        </a> : <span className="inline-flex h-9 items-center gap-2 text-xs text-red-300"><ShieldAlert className="h-4 w-4" />{project?.status === "blocked" ? "项目已封禁" : "域名已封禁"}</span>}
+                        {project && !bindingBlocked ? (
                           <button
                             className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md bg-white px-3 text-sm font-semibold text-black"
                             onClick={() => setEditingSlot(slot)}
@@ -351,6 +359,7 @@ export function DomainsPage({
             {editingSlot && !pendingBinding ? (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+                onMouseDown={(event) => { if (event.target === event.currentTarget && !bindingSlotId) setEditingSlot(null); }}
                 role="dialog"
                 aria-modal="true"
               >
@@ -409,6 +418,7 @@ export function DomainsPage({
             {pendingBinding ? (
               <div
                 className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
+                onMouseDown={(event) => { if (event.target === event.currentTarget && !bindingSlotId) setPendingBinding(null); }}
                 role="alertdialog"
                 aria-modal="true"
               >

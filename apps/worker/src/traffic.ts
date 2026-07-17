@@ -310,9 +310,13 @@ export async function runTrafficLifecycle(env: Env) {
     ? await domainQuery.in("hostname", hostnames)
     : await domainQuery;
   const siteIds = [...new Set((domains ?? []).map((domain: any) => domain.site_id))];
-  const { data: sites } = await supabase.from("sites").select("id, user_id, active_deployment_id").in("id", siteIds);
+  const { data: sites } = siteIds.length
+    ? await supabase.from("sites").select("id, user_id, active_deployment_id").in("id", siteIds)
+    : { data: [] };
   const userIds = [...new Set((sites ?? []).map((site: any) => site.user_id))];
-  const { data: profiles } = await supabase.from("profiles").select("id, plan").in("id", userIds);
+  const { data: profiles } = userIds.length
+    ? await supabase.from("profiles").select("id, plan").in("id", userIds)
+    : { data: [] };
   const siteUsers = new Map<string, string>((sites ?? []).map((site: any) => [String(site.id), String(site.user_id)]));
   const activeDeploymentIds = [...new Set((sites ?? []).map((site: any) => site.active_deployment_id).filter(Boolean))];
   const { data: deployments } = activeDeploymentIds.length
@@ -326,6 +330,9 @@ export async function runTrafficLifecycle(env: Env) {
   const rows = new Map<string, AccelerationRow>((existing ?? []).map((row: AccelerationRow) => [row.hostname, row]));
   const candidates: Array<{ row: AccelerationRow; deployment: ActiveDeployment; score: number; plan: string }> = [];
   const occupants: Array<{ row: AccelerationRow; score: number; plan: string }> = [];
+  const accelerationUpdates: any[] = [];
+  const deferredActions: Array<() => Promise<void>> = [];
+  const evaluatedAt = new Date().toISOString();
   for (const domain of domains ?? []) {
     const sample = current.get(domain.hostname) ?? { hostname: domain.hostname, requests: 0, bytes_sent: 0, page_views: 0 };
     const row: AccelerationRow = rows.get(domain.hostname) ?? { site_id: domain.site_id, hostname: domain.hostname, pages_project_name: null, pages_deployment_id: null, source_deployment_id: null, bypass_route_id: null, status: "shared", hot_windows: 0, cool_windows: 0, temporary_until: null, retry_count: 0, next_retry_at: null, accelerated_at: null };
@@ -342,14 +349,14 @@ export async function runTrafficLifecycle(env: Env) {
       row.next_retry_at = null;
     }
     if (!row.temporary_until && hot) row.temporary_until = new Date(Date.now() + (plan === "free" ? platformConfig.trafficAcceleration.freeProtectionHours : platformConfig.trafficAcceleration.paidProtectionHours) * 3600_000).toISOString();
-    await supabase.from("pages_accelerations").upsert({ ...row, last_request_count: sample.requests, last_evaluated_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    accelerationUpdates.push({ ...row, last_request_count: sample.requests, last_evaluated_at: evaluatedAt, updated_at: evaluatedAt });
     const retryReady = !row.next_retry_at || Date.parse(row.next_retry_at) <= Date.now();
     const activeDeployment = siteDeployments.get(domain.site_id);
     const score = accelerationScore(sample, activeDeployment?.file_count ?? 0, plan);
     const deploymentChanged = row.status === "accelerated" && activeDeployment && row.source_deployment_id !== activeDeployment.id;
-    if (deploymentChanged && retryReady) await refreshAcceleratedDeployment(env, row, activeDeployment);
+    if (deploymentChanged && retryReady) deferredActions.push(() => refreshAcceleratedDeployment(env, row, activeDeployment));
     const protectionExpired = Boolean(row.temporary_until && Date.parse(row.temporary_until) < Date.now());
-    if (row.status === "accelerated" && protectionExpired && (plan === "free" || row.cool_windows >= platformConfig.trafficAcceleration.cooldownConsecutiveWindows)) await demote(env, row, plan === "free");
+    if (row.status === "accelerated" && protectionExpired && (plan === "free" || row.cool_windows >= platformConfig.trafficAcceleration.cooldownConsecutiveWindows)) deferredActions.push(() => demote(env, row, plan === "free"));
     else if (row.status === "accelerated") occupants.push({ row, score, plan });
     else if (activeDeployment && retryReady) {
       const largeColdStart = activeDeployment.file_count >= platformConfig.trafficAcceleration.immediatePagesFileThreshold;
@@ -358,6 +365,13 @@ export async function runTrafficLifecycle(env: Env) {
       }
     }
   }
+
+  if (accelerationUpdates.length > 0) {
+    const { error } = await supabase.from("pages_accelerations").upsert(accelerationUpdates);
+    if (error) throw new Error(error.message);
+  }
+  for (const action of deferredActions) await action();
+  if (candidates.length === 0) return;
 
   candidates.sort((left, right) => right.score - left.score);
   let freeSlots = await availablePagesProjects(env);

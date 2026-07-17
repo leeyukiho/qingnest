@@ -8,7 +8,7 @@ import { STUDIO_PATH } from "@/app/navigation";
 import { StudioSidebar } from "@/app/StudioSidebar";
 import { ToastMessage } from "@/app/toast";
 import { STUDIO_CONTENT_SHELL_CLASS, STUDIO_EYEBROW_CLASS, STUDIO_HEADER_CLASS, STUDIO_MAIN_CLASS, STUDIO_SECONDARY_BUTTON_CLASS, STUDIO_SECTION_CLASS, STUDIO_TITLE_CLASS } from "@/app/ui";
-import { checkSubdomain, createAdminDomain, createAdminDomainPrice, createAdminNotification, createAdminPrivatePreview, deleteAdminDomain, deleteAdminDomainPrice, getAdminCapacity, getAdminNotifications, getAdminOrders, getAdminOverview, reconcileAdminOrder, refundAdminOrder, replaceAdminOrderDomain, retryAdminOrder, syncAdminDomainPrice, updateAdminCapacity, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminNotification, type AdminOverview, type AdminPaymentOrder, type AdminPlan, type CapacityDashboard, type CapacityMetricKey } from "@/lib/api";
+import { checkSubdomain, createAdminDomain, createAdminDomainPrice, createAdminNotification, createAdminPrivatePreview, deleteAdminDomain, deleteAdminDomainPrice, deleteAdminSite, getAdminCapacity, getAdminNotifications, getAdminOrders, getAdminOverview, reconcileAdminOrder, refundAdminOrder, replaceAdminOrderDomain, retryAdminOrder, syncAdminDomainPrice, updateAdminCapacity, updateAdminDomain, updateAdminDomainPrice, updateAdminPlan, updateAdminSite, updateAdminUser, type AccountProfile, type AdminDomainPrice, type AdminNotification, type AdminOverview, type AdminPaymentOrder, type AdminPlan, type CapacityDashboard, type CapacityMetricKey } from "@/lib/api";
 import { clientPlatformConfig } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -311,7 +311,7 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
                 <SearchField label="筛选项目" onChange={setProjectQuery} placeholder="搜索项目名称、所有者或项目 ID" value={projectQuery} />
                 <DataTable headers={["项目", "所有者", "更新时间", "状态", "操作"]}>
                   {filteredProjects.map((site) => {
-                    const hostname = projectHostnames.get(site.id);
+                    const hostname = site.status === "blocked" ? undefined : projectHostnames.get(site.id);
                     return (
                       <tr className="border-b border-white/10 last:border-0" key={site.id}>
                         <Cell>
@@ -337,6 +337,21 @@ export function AdminPage({ account, authReady, onNavigate, session }: { account
                               </button>
                             )}
                             <StatusAction current={site.status} label={site.name} onClick={() => changeStatus("项目", site.id, site.name, site.status)} />
+                            <button
+                              aria-label={`删除项目 ${site.name}`}
+                              className={dangerButton}
+                              onClick={() => confirm({
+                                title: "删除项目",
+                                description: `删除“${site.name}”后会停止访问并解绑其域名，项目记录不可恢复。`,
+                                destructive: true,
+                                confirmLabel: "确认删除",
+                                run: () => deleteAdminSite(site.id),
+                              })}
+                              title="删除项目"
+                              type="button"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </div>
                         </Cell>
                       </tr>
@@ -1395,6 +1410,7 @@ function DomainsPanel({ data, domainForm, priceDrafts, setDomainForm, setPriceDr
                   <select
                     aria-label={`${domain.hostname} 绑定项目`}
                     className={selectClass}
+                    disabled={domain.status === "blocked"}
                     onChange={(e) => {
                       const siteId = e.target.value || null;
                       const siteName = siteId ? data.recentSites.find((site) => site.id === siteId)?.name : "未绑定";

@@ -91,7 +91,7 @@ export function BillingPage({
   const handleTopup = async () => {
     if (topupValidationError) return;
     setTopupBusy(true); setOrdersError("");
-    try { const checkout = await createWalletTopup(topupAmountCents); sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo); window.location.assign(checkout.payUrl); }
+    try { const checkout = await createWalletTopup(topupAmountCents); sessionStorage.setItem("kuaipage:pending-order-no", checkout.orderNo); window.open(checkout.payUrl, "_blank", "noopener,noreferrer"); }
     catch (cause) { setOrdersError(cause instanceof Error ? cause.message : "充值订单创建失败"); setTopupBusy(false); }
   };
   const handleCancelOrder = async (orderId: string) => {
@@ -101,6 +101,7 @@ export function BillingPage({
     try {
       const cancelled = await cancelOrder(orderId);
       setOrders((current) => current.map((order) => order.id === orderId ? cancelled : order));
+      setOrderDetail((current) => current?.id === orderId ? cancelled : current);
     } catch (cause) {
       setOrdersError(cause instanceof Error ? cause.message : "取消订单失败");
     } finally {
@@ -186,8 +187,7 @@ export function BillingPage({
                 <div className="flex items-center gap-3">
                   <ReceiptText className="h-5 w-5 text-zinc-400" aria-hidden="true" />
                   <div>
-                    <h2 className="text-base font-semibold text-white" id="orders-title">订单记录</h2>
-                    <p className="mt-1 text-xs text-zinc-500">套餐与域名购买记录</p>
+                    <span className="text-xs text-zinc-600">共 {orders.length} 笔</span>
                   </div>
                 </div>
                 <span className="text-xs text-zinc-600">共 {orders.length} 笔</span>
@@ -220,7 +220,7 @@ export function BillingPage({
                   <div className="border-b border-white/10 py-4 sm:pl-6"><dt className="text-xs text-zinc-600">完成时间</dt><dd className="mt-1 text-sm text-zinc-300">{orderDetail.fulfilledAt ? new Date(orderDetail.fulfilledAt).toLocaleString("zh-CN") : "-"}</dd></div>
                 </dl>
                 {orderDetail.failureMessage ? <p className="mt-4 rounded-md border border-amber-400/20 bg-amber-400/[0.05] p-3 text-sm text-amber-300">{orderDetail.failureMessage}</p> : null}
-                {orderDetail.payUrl ? <div className="mt-5 flex justify-end"><button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200" onClick={() => window.location.assign(orderDetail.payUrl!)} type="button">继续支付<ExternalLink className="h-4 w-4" /></button></div> : null}
+                <div className="mt-5 flex justify-end gap-2">{orderDetail.payUrl && (orderDetail.status === "pending" || orderDetail.status === "payment_failed") ? <button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-zinc-200" onClick={() => window.open(orderDetail.payUrl!, "_blank", "noopener,noreferrer")} type="button">继续支付<ExternalLink className="h-4 w-4" /></button> : null}{orderDetail.status === "pending" || orderDetail.status === "payment_failed" ? <button className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/20 px-4 text-sm text-zinc-200 hover:bg-white/5 disabled:opacity-50" disabled={cancellingOrderId !== null} onClick={() => void handleCancelOrder(orderDetail.id)} type="button">{cancellingOrderId === orderDetail.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}取消订单</button> : null}</div>
               </div> : null}
             </section> : null}
           </main>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Check, CreditCard, LoaderCircle, Minus, WalletCards, X } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { CONTENT_TRACK_CLASS } from "@/app/ui";
-import { STUDIO_BILLING_PATH, STUDIO_WALLET_PATH } from "@/app/navigation";
+import { getStudioOrderPath, STUDIO_BILLING_PATH, STUDIO_WALLET_PATH } from "@/app/navigation";
 import { formatBytes } from "@/app/deployment-view";
 import { createPlanPayment, getPublicPlans, type PublicPlan } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -57,6 +57,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [payingPlan, setPayingPlan] = useState<string | null>(null);
+  const [payingMethod, setPayingMethod] = useState<"wallet" | "alipay" | null>(null);
   const [checkoutPlan, setCheckoutPlan] = useState<PublicPlan | null>(null);
 
   useEffect(() => {
@@ -82,13 +83,21 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
   const choosePlan = async (plan: PublicPlan, paymentMethod: "wallet" | "alipay") => {
     if (!session || plan.renewal_price_cents === 0) { onNavigate(startPath); return; }
     setPayingPlan(plan.key);
+    setPayingMethod(paymentMethod);
     setError("");
     try {
       const result = await createPlanPayment(plan.key, 1, paymentMethod);
       if ("payUrl" in result) {
         sessionStorage.setItem("kuaipage:pending-order-no", result.orderNo);
-        window.location.assign(result.payUrl);
+        window.open(result.payUrl, "_blank", "noopener,noreferrer");
+        setPayingPlan(null);
+        setPayingMethod(null);
+        setCheckoutPlan(null);
+        onNavigate(getStudioOrderPath(result.orderId));
       } else {
+        setPayingPlan(null);
+        setPayingMethod(null);
+        setCheckoutPlan(null);
         onNavigate(STUDIO_BILLING_PATH);
       }
     } catch (cause) {
@@ -100,6 +109,7 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
         setError(message);
       }
       setPayingPlan(null);
+      setPayingMethod(null);
     }
   };
 
@@ -186,8 +196,8 @@ export function PricingPage({ onNavigate, session }: { onNavigate: (path: string
         <div className="w-full border border-white/15 bg-zinc-950 p-5 shadow-2xl sm:max-w-md sm:rounded-md sm:p-6">
           <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-white" id="checkout-title">选择支付方式</h2><p className="mt-1 text-sm text-zinc-500">{checkoutPlan.label} · ¥{money(checkoutPlan.renewal_price_cents)} / 月</p></div><button aria-label="关闭" className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-40" disabled={payingPlan !== null} onClick={() => setCheckoutPlan(null)} type="button"><X className="h-4 w-4" /></button></div>
           <div className="mt-5 grid gap-2">
-            <button autoFocus className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "wallet")} type="button"><WalletCards className="h-5 w-5 shrink-0 text-emerald-400" /><span><span className="block text-sm font-semibold text-white">账户余额</span><span className="mt-1 block text-xs text-zinc-500">余额不足时可前往钱包充值</span></span>{payingPlan === checkoutPlan.key ? <LoaderCircle className="ml-auto h-4 w-4 animate-spin" /> : <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />}</button>
-            <button className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "alipay")} type="button"><CreditCard className="h-5 w-5 shrink-0 text-sky-400" /><span><span className="block text-sm font-semibold text-white">支付宝</span><span className="mt-1 block text-xs text-zinc-500">创建订单后前往支付宝完成付款</span></span><ArrowRight className="ml-auto h-4 w-4 text-zinc-600" /></button>
+            <button autoFocus className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "wallet")} type="button"><WalletCards className="h-5 w-5 shrink-0 text-emerald-400" /><span><span className="block text-sm font-semibold text-white">账户余额</span><span className="mt-1 block text-xs text-zinc-500">余额不足时可前往钱包充值</span></span>{payingPlan === checkoutPlan.key && payingMethod === "wallet" ? <LoaderCircle className="ml-auto h-4 w-4 animate-spin" /> : <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />}</button>
+            <button className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-white/15 px-4 text-left transition-colors hover:border-white/35 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50" disabled={payingPlan !== null} onClick={() => void choosePlan(checkoutPlan, "alipay")} type="button"><CreditCard className="h-5 w-5 shrink-0 text-sky-400" /><span><span className="block text-sm font-semibold text-white">支付宝</span><span className="mt-1 block text-xs text-zinc-500">创建订单后前往支付宝完成付款</span></span>{payingPlan === checkoutPlan.key && payingMethod === "alipay" ? <LoaderCircle className="ml-auto h-4 w-4 animate-spin" /> : <ArrowRight className="ml-auto h-4 w-4 text-zinc-600" />}</button>
           </div>
         </div>
       </div> : null}
